@@ -27,7 +27,6 @@ import com.mojang.math.Axis;
 import net.ccbluex.liquidbounce.event.EventManager;
 import net.ccbluex.liquidbounce.event.events.GameRenderEvent;
 import net.ccbluex.liquidbounce.event.events.PerspectiveEvent;
-import net.ccbluex.liquidbounce.event.events.ScreenRenderEvent;
 import net.ccbluex.liquidbounce.event.events.WorldRenderEvent;
 import net.ccbluex.liquidbounce.features.module.modules.fun.ModuleDankBobbing;
 import net.ccbluex.liquidbounce.features.module.modules.render.*;
@@ -38,7 +37,6 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.ItemInHandRenderer;
@@ -141,17 +139,6 @@ public abstract class MixinGameRenderer {
         ModuleItemChams.Lightmap.INSTANCE.applyToTexture(this.lightmap.getTextureView());
         original.call(instance, frameInterp, poseStack, submitNodeCollector, player, lightCoords);
         ModuleItemChams.Lightmap.INSTANCE.resetTexture(this.lightmap.getTextureView());
-    }
-
-    /**
-     * Hook screen render event
-     */
-    @Inject(method = "extractGui", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/client/gui/screens/Screen;extractRenderStateWithTooltipAndSubtitles(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIF)V",
-            shift = At.Shift.AFTER))
-    public void hookScreenRender(DeltaTracker deltaTracker, boolean shouldRenderLevel, boolean resourcesLoaded,
-        CallbackInfo ci, @Local(name = "graphics") GuiGraphicsExtractor graphics) {
-        EventManager.INSTANCE.callEvent(new ScreenRenderEvent(graphics, deltaTracker.getGameTimeDeltaPartialTick(false)));
     }
 
     @Inject(method = "bobHurt", at = @At("HEAD"), cancellable = true)

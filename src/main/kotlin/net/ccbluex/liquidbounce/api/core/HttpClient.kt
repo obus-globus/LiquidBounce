@@ -134,7 +134,13 @@ object HttpClient {
         .addInterceptor(CacheBlacklistInterceptor(setOf("localhost", "127.0.0.1")))
         .addInterceptor(DefaultHeaderInterceptor("User-Agent", DEFAULT_AGENT, skipIfExists = true))
         .build().also {
-            MCEF.INSTANCE.settings.okHttpClient = it
+            try {
+                MCEF.INSTANCE.settings.okHttpClient = it
+            } catch (ignored: NoClassDefFoundError) {
+                // MCEF is not bundled on every loader; the browser backend
+                // degrades separately, see BrowserBackendManager
+                logger.warn("Skipping MCEF HTTP client setup, MCEF is not available")
+            }
             Authlib.client = it
         }
 
