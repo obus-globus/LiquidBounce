@@ -510,7 +510,12 @@ tasks.register<Jar>("vanillaSelfContainedAgentJar") {
         attributes(mapOf("Implementation-Title" to "ASM", "Implementation-Version" to asmVer), "org/objectweb/asm/")
     }
     // (a) Mixin framework unpacked at root (ASM first so 9.x wins); drop rival service files/signatures/module-info.
-    val infra = asmJars + spongeJar + vspikeMixinExtras.files
+    //     kotlin-stdlib is ALSO unpacked at root: bare-vanilla ships JOML 1.10.8 which bundles Kotlin
+    //     extensions (org.joml.Vector2iKt) on the system loader — LB's destructuring of a JOML vector
+    //     (CefBrowser.kt) triggers loading kotlin.jvm.internal.Intrinsics via JOML's kotlin-less loader.
+    //     Putting kotlin-stdlib on the system loader gives one shared kotlin runtime (libLoader delegates up).
+    val kotlinStdlib = configurations.runtimeClasspath.get().files.filter { it.name.matches(Regex("kotlin-stdlib-\\d.*\\.jar")) }
+    val infra = asmJars + spongeJar + vspikeMixinExtras.files + kotlinStdlib
     from(infra.map { zipTree(it) }) {
         exclude("META-INF/services/**", "module-info.class", "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "META-INF/MANIFEST.MF")
     }

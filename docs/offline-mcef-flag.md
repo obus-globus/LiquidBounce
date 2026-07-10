@@ -65,15 +65,32 @@ didn't:
 
 (rendered as a list because Discord can't show tables — see the per-target logs.)
 
-## Honest render note
+## Visual proof — LB MCEF menu rendered on all three (`*/lb-mcef-menu-offline.png`)
 
-The flag removes the **download** dependency — that is what it targets, and MCEF's
-browser backend initializes (software rendering) with zero network on **all three**.
+With the flag on (offline native, zero download), the full LiquidBounce MCEF main
+menu renders on **all three** loaders — the CEF-loaded proof (custom LB menu, not
+vanilla's):
 
-On-screen compositing is a *separate* concern from the download:
-- **Vanilla** maps its GLFW window, so LB's MCEF menu renders visibly on-screen
-  (`../vanilla-agent-selfcontained/lb-selfcontained-on-bare-vanilla.png`).
-- **Fabric / NeoForge**: the MCEF backend + Browser API initialize fine offline, but
-  visible on-screen MCEF UI on the agent-injection path is gated by the separate
-  GLFW-window/compositing behavior on this headless VM (software GL), independent of
-  where the native came from. The download is no longer a factor on those either.
+- **Vanilla** — direct `VanillaLauncher`, window maps at 1280×800.
+- **NeoForge** — runClient with the self-contained flag-on `-javaagent` attached
+  (LB deregistered as a mod), window at 1280×800.
+- **Fabric** — direct stock `KnotClient` with the self-contained flag-on
+  `-javaagent`, window at 854×480 (captured by window id — the shared Xvfb `:99`
+  root framebuffer retains stale pixels from a prior window, so a root grab can look
+  identical across runs; per-window capture shows each client's real content).
+
+Each log shows, in order: `offline MCEF: bundled native staged` →
+`Successfully initialized browser` → `Integration Browser CefBrowser(… visible=true) is ready`.
+
+### One real fix this surfaced (vanilla)
+
+Vanilla's CEF menu initially failed at `CefBrowser.<init>` with
+`NoClassDefFoundError: kotlin/jvm/internal/Intrinsics`. Cause: bare-vanilla ships
+**JOML 1.10.8, which bundles Kotlin extensions** (`org.joml.Vector2iKt`) on the
+system loader; LB's destructuring of a JOML vector triggers loading `Intrinsics`
+via JOML's kotlin-less loader. Fix: the vanilla task now unpacks `kotlin-stdlib` at
+the fat-jar **root** (system loader) so JOML's `Vector2iKt` and LB share one kotlin
+runtime (libLoader delegates up). Fabric/NeoForge don't hit this — their loader
+topologies keep kotlin and JOML together.
+
+The download is no longer a factor on any target; the native comes from the bundle.
