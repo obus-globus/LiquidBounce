@@ -1,0 +1,8 @@
+gradle.projectsEvaluated {
+  rootProject.tasks.matching { it.name == "runClient" }.configureEach { t ->
+    if (t instanceof JavaExec) {
+      (t as JavaExec).jvmArgs("-javaagent:/tmp/fspike/agent.jar", "-Dfspike.jar=/tmp/fspike/agent.jar")
+      println "[FSPIKE-INIT] attached -javaagent to " + t.name
+    }
+  }
+}
