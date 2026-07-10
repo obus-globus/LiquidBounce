@@ -1,0 +1,8 @@
+1:[neoforge-agent] built nfagent.jar (bundled ASM: 0)
+2:[neoforge-agent] LB neoforge build outputs ready
+3:[neoforge-agent] launching NeoForge + LB agent (LB loaded via agent, not a mod)…
+71:[NFAGENT] loaded LB AccessTransformer into FML AT engine
+111:[NFAGENT] registered LB reload listeners via AddClientReloadListenersEvent (mod-bus replicated)
+112:[10:18:05] [Render thread/INFO] [LiquidBounce/]: Launching LiquidBounce v0.38.1 by CCBlueX
+119:[10:18:05] [Render thread/INFO] [minecraft/ReloadableResourceManager]: Reloading ResourceManager: vanilla, mod_resources, mod/sodium, mod/lithium, mod/mcef, mod/immediatelyfast, mod/neoforge
+131:[10:18:06] [Render thread/INFO] [LiquidBounce/]: Loaded 36 Render Pipelines.
