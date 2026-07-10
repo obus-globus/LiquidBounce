@@ -1,0 +1,10 @@
+[LBAGENT] premain: hooking FabricMixinBootstrap (LB via agent, not a mod)
+[08:08:35] [main/INFO] (FabricLoader) Loading 116 mods:
+[LBAGENT] rewrote FabricMixinBootstrap.init
+[LBAGENT] LB classes+resources added to Knot=net.fabricmc.loader.impl.launch.knot.KnotClassLoader@2a556333
+[LBAGENT] applied liquidbounce.accesswidener via ClassTweaker (13747 bytes)
+[LBAGENT] added liquidbounce.mixins.json + liquidbounce-fabric.mixins.json
+[08:08:46] [Render thread/INFO] (LiquidBounce) Launching LiquidBounce v0.38.1 by CCBlueX
+[08:08:53] [Render thread/INFO] (LiquidBounce/ConfigSystem) Successfully loaded config 'modules'.
+[08:08:53] [Render thread/INFO] (LiquidBounce/ConfigSystem) Successfully stored config 'modules'.
+[08:08:53] [Render thread/INFO] (LiquidBounce/ScreenManager) Integration Browser CefBrowser(hash='797799661', id='1', url='http://127.0.0.1:41687/resource/liquidbounce/?lb_code=SwTVSsLwJox6h0H7#/title', visible=true, priority=10) is ready.

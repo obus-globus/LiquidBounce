@@ -1,0 +1,16 @@
+1:[fabric-agent] built lbagent.jar (bundled ASM: 0 — must be 0, Fabric aborts on duplicate ASM)
+2:[fabric-agent] LB build outputs ready
+3:[fabric-agent] launching bare Fabric + LB agent (LB loaded via agent, not as a mod)…
+16:[LB-AGENT-INIT] LB removed from mod classpath; agent attached to runClient
+39:[LBAGENT] premain: hooking FabricMixinBootstrap (LB via agent, not a mod)
+40:[08:20:09] [main/INFO] (FabricLoader/GameProvider) Loading Minecraft 26.2 with Fabric Loader 0.19.3
+43:[08:20:10] [main/INFO] (FabricLoader) Loading 116 mods:
+160:[LBAGENT] rewrote FabricMixinBootstrap.init
+163:[LBAGENT] LB classes+resources added to Knot=net.fabricmc.loader.impl.launch.knot.KnotClassLoader@2a556333
+164:[LBAGENT] applied liquidbounce.accesswidener via ClassTweaker (13747 bytes)
+165:[LBAGENT] added liquidbounce.mixins.json + liquidbounce-fabric.mixins.json
+182:[08:20:17] [Render thread/INFO] (Minecraft) Setting user: Player894
+198:[08:20:19] [Render thread/INFO] (Minecraft) Backend library: LWJGL version 3.4.1-snapshot
+224:[08:20:20] [Render thread/INFO] (LiquidBounce) Launching LiquidBounce v0.38.1 by CCBlueX
+225:[08:20:20] [Render thread/INFO] (LiquidBounce) Client Version: 0.38.1 (git-3ec914b)
+432:[08:20:27] [Render thread/INFO] (LiquidBounce/CefBrowser/1750612612) Finished loading (url='http://127.0.0.1:41013/resource/liquidbounce/?lb_code=iaNUNdF7YUdki9Mh#/', httpStatusCode=200)

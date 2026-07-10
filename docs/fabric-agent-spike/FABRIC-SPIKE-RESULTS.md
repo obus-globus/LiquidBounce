@@ -41,3 +41,57 @@ classpath's ASM.
 The gate is green → building the full LB-on-Fabric-via-agent interposer is warranted
 (ClassTweaker for LB's AW, `addToClassPath` for LB's jar + kotlin-stdlib + FLK, the same
 `FabricMixinBootstrap` hook to add `liquidbounce.mixins.json`).
+
+---
+
+# Full LB-on-Fabric-via-agent — DONE (milestones b + c)
+
+Built the full interposer (`lb-agent/src/lbagent/{LBAgent,LBHook}.java`). Same non-mod
+`FabricMixinBootstrap.init` hook as the spike, but the hook now injects **the real LB**:
+- `addToClassPath(lb.classesKotlin/lb.classesJava, "net.ccbluex")` + `addToClassPath(lb.resources)`;
+- LB's AccessWidener applied to the **live** Knot via the ClassTweaker system
+  (`ClassTweakerReader.create(FabricLoaderImpl.INSTANCE.getClassTweaker()).read(aw, "official")`
+  — the 0.19.3 replacement for the removed `FabricLauncherBase.AccessWidener`);
+- `Mixins.addConfiguration("liquidbounce.mixins.json")` + `"liquidbounce-fabric.mixins.json"`.
+
+**(b) LB initializes on Fabric-via-agent** — `lb-fabric-init-proof.log`,
+`lb-full-menu-on-fabric-via-agent.png` (MCEF ClickGUI menu). LB is loaded by the agent,
+**not** as a mod: it is absent from Fabric's 116-mod enumeration.
+
+**(c) A module functions in-world** — Fly toggled via config, F3 shows the player rise
+**Y=-60.0 → Y=-8.68 (+51 blocks)** in a superflat survival world.
+Before: `lb-fabric-fly-before-y-60.png`; after: `lb-fabric-fly-after-y-9.png`.
+
+## Clean-room reproduction (committed, not a hand-assembled fluke)
+
+`fabric-agent-run.sh` reproduces the whole thing from committed artifacts + loom's own
+outputs — no hand-edited argFiles:
+1. Compiles the committed agent sources → `lbagent.jar` (asserts **0 bundled ASM**).
+2. `./gradlew classes processResources` (LB build outputs the agent will inject).
+3. Generates a Gradle **init script** that, on loom's `runClient` JavaExec,
+   (a) filters LB's three build dirs (`build/classes/{java,kotlin}/main`, `build/resources/main`)
+   **out of the mod classpath** so Fabric does not discover LB as a mod, and
+   (b) attaches `-javaagent:lbagent.jar` + the `lb.classes*/lb.resources` locators.
+4. `./gradlew :runClient --init-script …`.
+
+Cold-run proof — `lb-fabric-cleanroom-proof.log`:
+```
+[fabric-agent] built lbagent.jar (bundled ASM: 0 …)
+[LB-AGENT-INIT] LB removed from mod classpath; agent attached to runClient
+[LBAGENT] rewrote FabricMixinBootstrap.init
+[LBAGENT] LB classes+resources added to Knot=…KnotClassLoader@…
+[LBAGENT] applied liquidbounce.accesswidener via ClassTweaker (13747 bytes)
+[LBAGENT] added liquidbounce.mixins.json + liquidbounce-fabric.mixins.json
+(FabricLoader) Loading 116 mods:                 ← LB is NOT among them
+(LiquidBounce) Launching LiquidBounce v0.38.1 by CCBlueX
+(LiquidBounce/CefBrowser) Finished loading (…/resource/liquidbounce/…, httpStatusCode=200)
+```
+LB confirmed **absent from the 116-mod enumeration**; loaded, initialized, and its web UI
+served — entirely via the agent.
+
+## Known PoC limitations (Fabric, same as vanilla)
+- MCEF PR not merged upstream → needs the local `mcef-fabric` snapshot to be present.
+- MCEF/libcef ClickGUI interaction can SIGILL under software GL (llvmpipe on this VM) —
+  a VM/driver caveat, not the agent; enable modules via config/chat rather than ClickGUI clicks here.
+- Dev-namespace launch (`official`) matches LB's AW; a production install would attach the
+  agent to the real launcher's JVM args identically (the hook is namespace-agnostic).

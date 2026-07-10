@@ -1,0 +1,7 @@
+1:[FSPIKE-INIT] attached -javaagent to runClient
+2:[FSPIKE] premain: installing FabricMixinBootstrap hook (non-mod)
+124:[FSPIKE] rewrote FabricMixinBootstrap.init (1 return site(s) hooked)
+127:[FSPIKE] added agent jar to Knot classpath, target CL=net.fabricmc.loader.impl.launch.knot.KnotClassLoader@7d70d1b1
+128:[FSPIKE] addConfiguration(spike.mixins.json) OK; live service=net.fabricmc.loader.impl.launch.knot.MixinServiceKnot
+[07:32:01] [Render thread/INFO] (Minecraft) [STDOUT]: [FSPIKE] >>> AGENT-ADDED MIXIN FIRED inside net.minecraft.client.Minecraft on a LIVE FABRIC install <<<
+# ... (fired 32990x = applied every getWindow call)
