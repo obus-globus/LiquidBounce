@@ -31,6 +31,8 @@ public final class SCHook {
 
             // 1) locate this agent jar and extract its bundled libs to a temp dir
             File agentJar = new File(SCHook.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            // Optional offline MCEF (-PbundleMcefNative): stage bundled native + set PROVIDED_JCEF_PATH.
+            McefNative.stageIfBundled(agentJar, "[SCAGENT]");
             Path tmp = Files.createTempDirectory("lb-agent-");
             tmp.toFile().deleteOnExit();
             Path lbJar = null;

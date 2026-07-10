@@ -457,6 +457,15 @@ tasks.register<Jar>("fabricSelfContainedAgentJar") {
             g in keepGroups || g.startsWith("org.graalvm") || (g == "net.raphimc" && f.name.startsWith("MinecraftAuth"))
         })
     }
+    // (opt-in, TEMPORARY) -PbundleMcefNative bundles MCEF's native libcef (~350 MB) so MCEF inits fully
+    // offline (SCHook stages it + sets PROVIDED_JCEF_PATH). Default OFF = lean download-on-load jar.
+    if (project.hasProperty("bundleMcefNative")) {
+        val nd = file((project.findProperty("mcefNativeDir") as String?)
+            ?: "$rootDir/LiquidBounce/mcef/libraries/aa20e50dbfb858ea50d3cf405b8202462dd10d96/linux_amd64")
+        if (!nd.isDirectory) throw GradleException("bundleMcefNative: native dir not found: $nd (pass -PmcefNativeDir=)")
+        from(nd) { into("mcef-native") }
+        logger.lifecycle("bundleMcefNative ON: bundling MCEF native from $nd")
+    }
 }
 
 // ===== Self-contained vanilla agent (productionization; docs/vanilla-agent-selfcontained) =====
@@ -510,6 +519,15 @@ tasks.register<Jar>("vanillaSelfContainedAgentJar") {
     // (c) our standalone-Mixin-service registrations + the optional test config
     from("docs/vanilla-agent-selfcontained/agent-meta")
     from("docs/vanilla-agent-selfcontained/src/vspike.mixins.json")
+    // (opt-in, TEMPORARY) -PbundleMcefNative bundles MCEF's native libcef (~350 MB) so MCEF inits fully
+    // offline (VanillaLauncher stages it + sets PROVIDED_JCEF_PATH). Default OFF = lean download-on-load jar.
+    if (project.hasProperty("bundleMcefNative")) {
+        val nd = file((project.findProperty("mcefNativeDir") as String?)
+            ?: "$rootDir/LiquidBounce/mcef/libraries/aa20e50dbfb858ea50d3cf405b8202462dd10d96/linux_amd64")
+        if (!nd.isDirectory) throw GradleException("bundleMcefNative: native dir not found: $nd (pass -PmcefNativeDir=)")
+        from(nd) { into("mcef-native") }
+        logger.lifecycle("bundleMcefNative ON: bundling MCEF native from $nd")
+    }
     // (d) LB payload under agent-libs/: LB classes jar + LB-owned deps. Drop the bare-vanilla platform
     //     (piston libs), the Mixin infra (asm/mixinextras, at root) and the Fabric loader ecosystem/mods.
     val dropGroups = setOf(

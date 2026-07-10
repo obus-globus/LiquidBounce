@@ -364,4 +364,13 @@ tasks.register<Jar>("neoforgeSelfContainedAgentJar") {
             g in keepGroups || g.startsWith("org.graalvm")
         })
     }
+    // (opt-in, TEMPORARY) -PbundleMcefNative bundles MCEF's native libcef (~350 MB) so MCEF inits fully
+    // offline (NFAgent stages it + sets PROVIDED_JCEF_PATH). Default OFF = lean download-on-load jar.
+    if (project.hasProperty("bundleMcefNative")) {
+        val nd = file((project.findProperty("mcefNativeDir") as String?)
+            ?: "$rootDir/LiquidBounce/mcef/libraries/aa20e50dbfb858ea50d3cf405b8202462dd10d96/linux_amd64")
+        if (!nd.isDirectory) throw GradleException("bundleMcefNative: native dir not found: $nd (pass -PmcefNativeDir=)")
+        from(nd) { into("mcef-native") }
+        logger.lifecycle("bundleMcefNative ON: bundling MCEF native from $nd")
+    }
 }

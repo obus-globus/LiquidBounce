@@ -81,6 +81,8 @@ public final class NFAgent {
     public static void premain(String args, Instrumentation inst) {
         try {
             File agentJar = new File(NFAgent.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            // Optional offline MCEF (-PbundleMcefNative): stage bundled native + set PROVIDED_JCEF_PATH.
+            McefNative.stageIfBundled(agentJar, "[NFAGENT]");
             java.nio.file.Path tmp = java.nio.file.Files.createTempDirectory("lb-nf-agent-");
             tmp.toFile().deleteOnExit();
             List<URL> urls = new ArrayList<>();

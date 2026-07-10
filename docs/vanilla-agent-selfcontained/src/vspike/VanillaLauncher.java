@@ -63,6 +63,10 @@ public class VanillaLauncher {
         }
         System.out.println("[VSPIKE] staged " + lbUrls.size() + " bundled LB jars to " + tmp);
 
+        // Optional offline MCEF: if built with -PbundleMcefNative, this jar carries the native libcef;
+        // stage it + point MCEF at it so it initializes with zero network (default is download-on-load).
+        McefNative.stageIfBundled(selfJar, "[VSPIKE]");
+
         // 2. libLoader over the extracted payload; parent = app loader (Mixin framework). Becomes the
         //    context classloader so Mixin's service resolves LB configs/classes/resources from the bundle.
         final URLClassLoader libLoader = new URLClassLoader("lb-lib", lbUrls.toArray(new URL[0]), app);
