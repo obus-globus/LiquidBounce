@@ -313,3 +313,55 @@ tasks.jar {
         }
     }
 }
+
+// ===== Self-contained NeoForge agent (productionization; docs/neoforge-agent-selfcontained) =====
+sourceSets { create("nfagent") { java.srcDir("../docs/neoforge-agent-selfcontained/src") } }
+tasks.register("dumpNfDeps") {
+    doLast {
+        configurations.runtimeClasspath.get().forEach { f ->
+            if (!f.name.endsWith(".jar")) return@forEach
+            val p = f.absolutePath
+            val g = when {
+                p.contains("files-2.1/") -> p.substringAfter("files-2.1/").substringBefore("/")
+                p.contains(".m2/repository/") -> p.substringAfter(".m2/repository/").split("/").let { it.subList(0, it.size - 3).joinToString(".") }
+                else -> "?"
+            }
+            println("NFDEP $g ${f.name}")
+        }
+    }
+}
+tasks.register<Jar>("lbClassesForNfAgent") {
+    dependsOn("classes", "processResources")
+    archiveFileName.set("liquidbounce.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("agent/tmp"))
+    from(sourceSets.main.get().output) // LB neoforge compiled classes + resources
+}
+tasks.register<Jar>("neoforgeSelfContainedAgentJar") {
+    group = "liquidbounce"
+    description = "Single self-contained -javaagent jar for NeoForge (LB + dep tree + AT), no mod."
+    dependsOn("nfagentClasses", "lbClassesForNfAgent", "convertAccessWidener")
+    archiveFileName.set("liquidbounce-agent-neoforge.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("agent"))
+    manifest { attributes("Premain-Class" to "nfagent.NFAgent", "Can-Retransform-Classes" to "true", "Can-Redefine-Classes" to "true") }
+    from(sourceSets["nfagent"].output)                                  // agent classes at root
+    from(convertAccessWidener.map { it.output })                        // accesstransformer.cfg at root
+    val keepGroups = setOf(
+        "net.ccbluex", "org.jetbrains.kotlin", "org.jetbrains.kotlinx", "ai.djl", "ai.djl.pytorch",
+        "com.squareup.okhttp3", "com.squareup.okio", "com.kohlschutter.junixsocket", "org.ahocorasick",
+        "org.apache.tika", "net.lenni0451", "com.vdurmont", "com.thealtening.api",
+        "com.jagrosh"
+    )
+    into("agent-libs") {
+        from(tasks.named<Jar>("lbClassesForNfAgent").flatMap { it.archiveFile })
+        from(configurations.runtimeClasspath.get().filter { f ->
+            if (!f.name.endsWith(".jar")) return@filter false
+            val p = f.absolutePath
+            val g = when {
+                p.contains("files-2.1/") -> p.substringAfter("files-2.1/").substringBefore("/")
+                p.contains(".m2/repository/") -> p.substringAfter(".m2/repository/").split("/").let { it.subList(0, it.size - 3).joinToString(".") }
+                else -> ""
+            }
+            g in keepGroups || g.startsWith("org.graalvm")
+        })
+    }
+}
