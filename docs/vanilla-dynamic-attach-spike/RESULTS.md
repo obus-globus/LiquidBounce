@@ -1,5 +1,12 @@
 # No-flag dynamic-attach injection — feasibility spike
 
+> **CORRECTION (see `BARRIER1-PROBE.md`):** the Case A "a running MC does not catch SIGQUIT / attach
+> fails" result below was a **measurement artifact** — the pid used was the `timeout` wrapper process,
+> not the java JVM. The real JVM catches SIGQUIT throughout and `VirtualMachine.attach` works on a live
+> MC at any point (no early window, no ptrace). Case B (early attach) still works; the retransform
+> schema-change wall (Wall 2) is real and unchanged. Read `BARRIER1-PROBE.md` for the corrected picture.
+
+
 **Question:** can LB be injected into vanilla MC started with **no flags** (a separate
 injector process `VirtualMachine.attach`es), instead of needing `-javaagent` at launch?
 

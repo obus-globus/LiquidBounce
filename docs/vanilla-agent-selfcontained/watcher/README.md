@@ -1,5 +1,12 @@
 # LiquidBounce watcher — no-flag injection into vanilla MC
 
+> **CORRECTION:** the watcher works, but *not* by beating an "early SIGQUIT window" — a live MC is
+> attachable at any point (see `../../vanilla-dynamic-attach-spike/BARRIER1-PROBE.md`; the earlier
+> SIGQUIT-window claim was a `timeout`-wrapper measurement artifact). The watcher's real value is
+> **coverage**: attaching early minimizes the already-loaded set, so more mixin targets are caught
+> on-load rather than falling under the retransform schema-change wall.
+
+
 Inject LB into **stock vanilla Minecraft started with no flags** — no `-javaagent`, no
 `--add-opens`, no launcher. The user runs the **watcher** first; it detects a Minecraft
 JVM and, in the early boot window, attaches the pure LB agent (`:vanillaPureAgentJar`) so
