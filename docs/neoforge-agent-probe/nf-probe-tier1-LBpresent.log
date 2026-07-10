@@ -1,0 +1,11 @@
+[NFPROBE-INIT] fml.modFolders overridden empty (LB deregistered); nfprobe agent attached
+[NFPROBE] premain fired — java=25.0.3 retransformSupported=true redefineSupported=true
+[NFPROBE] ClassFileTransformer registered (whole-JVM, all classloaders)
+ - liquidbounce (composite(folder(/home/clawd/obus/liquidbounce-and-stuff/liquidbounce neoforge/LiquidBounce/neoforge/build/classes/java/main), folder(/home/clawd/obus/liquidbounce-and-stuff/liquidbounce neoforge/LiquidBounce/neoforge/build/classes/kotlin/main), folder(/home/clawd/obus/liquidbounce-and-stuff/liquidbounce neoforge/LiquidBounce/neoforge/build/resources/main)))
+[NFPROBE] first net.minecraft.client class intercepted: net/minecraft/client/main/Main loader=net.neoforged.fml.classloading.transformation.TransformingClassLoader module=minecraft
+[NFPROBE] *** transform() SAW net/minecraft/client/Minecraft loader=net.neoforged.fml.classloading.transformation.TransformingClassLoader module=minecraft ***
+[NFPROBE] injected println into Minecraft.run
+[NFPROBE] injected println into Minecraft.<clinit>
+[NFPROBE] transformed Minecraft (177304 -> 177704 bytes)
+[NFPROBE-INJECTED] executing inside net.minecraft.client.Minecraft.<clinit> on a LIVE NeoForge install — injected by a premain agent, NOT a mod
+[NFPROBE-INJECTED] executing inside net.minecraft.client.Minecraft.run on a LIVE NeoForge install — injected by a premain agent, NOT a mod

@@ -1,0 +1,13 @@
+13:[NFPROBE-INIT] cleared ModFoldersProvider (LB deregistered as mod); nfprobe agent attached
+32:[NFPROBE] premain fired — java=25.0.3 retransformSupported=true redefineSupported=true
+33:[NFPROBE] ClassFileTransformer registered (whole-JVM, all classloaders)
+79:[NFPROBE] first net.minecraft.client class intercepted: net/minecraft/client/main/Main loader=net.neoforged.fml.classloading.transformation.TransformingClassLoader module=minecraft
+92:[NFPROBE] *** transform() SAW net/minecraft/client/Minecraft loader=net.neoforged.fml.classloading.transformation.TransformingClassLoader module=minecraft ***
+93:[NFPROBE] injected println into Minecraft.run
+94:[NFPROBE] injected println into Minecraft.<clinit>
+95:[NFPROBE] transformed Minecraft (161997 -> 162397 bytes)
+96:[NFPROBE-INJECTED] executing inside net.minecraft.client.Minecraft.<clinit> on a LIVE NeoForge install — injected by a premain agent, NOT a mod
+98:[08:35:18] [Render thread/INFO] [minecraft/Minecraft]: Setting user: Dev
+104:[08:35:19] [Render thread/INFO] [minecraft/ReloadableResourceManager]: Reloading ResourceManager: vanilla, mod_resources, mod/sodium, mod/lithium, mod/mcef, mod/immediatelyfast, mod/neoforge
+105:[NFPROBE-INJECTED] executing inside net.minecraft.client.Minecraft.run on a LIVE NeoForge install — injected by a premain agent, NOT a mod
+116:[08:35:20] [Render thread/INFO] [minecraft/SoundEngine]: Sound engine started

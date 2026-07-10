@@ -1,0 +1,14 @@
+gradle.projectsEvaluated {
+  rootProject.subprojects.each { sp ->
+    sp.tasks.matching { it.name == "runClient" }.configureEach { t ->
+      if (t instanceof JavaExec) {
+        def je = t as JavaExec
+        // sole provider is ModDevGradle's ModFoldersProvider (registers LB as dev mod "liquidbounce").
+        // Clearing it => LB is NOT a discovered ModFile. Other mods (sodium/lithium/mcef) come via modpath.
+        je.jvmArgumentProviders.clear()
+        je.jvmArgs("-Dfml.modFolders=", "-javaagent:/tmp/nfprobe.jar")
+        println "[NFPROBE-INIT] cleared ModFoldersProvider (LB deregistered as mod); nfprobe agent attached"
+      }
+    }
+  }
+}
