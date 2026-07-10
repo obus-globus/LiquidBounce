@@ -1,0 +1,9 @@
+# @Unique field -> external per-instance storage — benchmark
+Single thread, 256 instances, power-of-2 mask index (harness floor ~0.6ns), 100M accesses, 2 runs:
+  real field (baseline @Unique):   ~0.6 ns/access
+  unsync IdentityHashMap:          ~6.8 ns/access   (only valid if the field is single-thread-confined)
+  ConcurrentHashMap (thread-safe): ~7.7-8.8 ns/access
+
+=> external per-instance storage costs ~+7-8 ns absolute per access (~10-13x a field).
+   Negligible for normal-frequency fields (dozens-hundreds accesses/frame -> sub-microsecond);
+   material only for inner-loop fields (1e5+ accesses/frame, e.g. per-block/per-vertex/per-particle).
