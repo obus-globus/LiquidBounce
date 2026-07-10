@@ -110,15 +110,22 @@ Productionizing = turning those into artifacts a user can actually attach, repro
   **unproven against a production launcher**, and the **mapping namespace is NOT uniform** (see the
   CRITICAL objection below):
   - **vanilla** — MC 26.2 ships **Mojmap/official even in production** (verified: `client_mappings`
-    absent, jar sha1 matches manifest). LB's AW/mixins target official → **prod = dev, no refmap
-    needed.** The one production-safe target.
-  - **Fabric** — production Fabric remaps MC to **intermediary** at runtime. The dev spike only
-    worked because loom sets the namespace to `official`, and `LBHook` **hardcodes**
-    `ClassTweakerReader…read(aw, "official")`. On a real Fabric install LB's mixins/AW target names
-    that don't exist → **LB needs its refmap + the intermediary remap the loader does in dev.
-    UNPROVEN and load-bearing.**
-  - **NeoForge** — 26.2 runtime uses Mojmap names, so likely prod = dev, **but the AT/mixin refmap
-    situation is unverified** against a real NeoForge install (only dev `runClient` was tested).
+    absent, raw jar has `net/minecraft/client/Minecraft.class`, 0 obfuscated classes). Agent loads
+    the jar directly → official → **no refmap.**
+  - **Fabric** — **RUNTIME-TESTED, no refmap needed** (2026-07-10, `agent-injection-mapping-test/`).
+    The reviewer's "production remaps to intermediary" objection is **FALSIFIED**. Proven at four
+    levels: (1) raw Mojang 26.2 client jar is Mojmap (0 obfuscated); (2) Fabric publishes **no
+    intermediary for 26.2** (`intermediary/26.2` = HTTP 404); (3) `fabric-loader 0.19.3
+    MappingConfiguration.computeRuntimeNamespace()` picks `intermediary` **only if the mappings
+    contain it**, else `official`; (4) a **production-mode** launch (`fabric.development=null`, no
+    loom, direct `KnotClient`) logged `Mappings not present!` + `Fabric runtime namespace = official`
+    and loaded `net/minecraft/client/Minecraft` (Mojmap name), not `class_310`. LB's mixins/AW +
+    `LBHook`'s `read(aw,"official")` are therefore correct for stock Fabric 26.2. (Fabric's
+    intermediary is legacy compatibility for pre-Mojmap versions — irrelevant to 26.2.)
+  - **NeoForge** — 26.2 runtime uses Mojmap names (its own official-mappings pipeline; the in-world
+    stack traces show `net.minecraft.client.Minecraft`). LB's neoforge build produces **no refmap**.
+    Same situation as the other two. (A production-launcher-profile test would confirm, but the
+    namespace risk is resolved — 26.2 is Mojmap everywhere.)
 - Package each agent as a self-contained jar that carries LB's compiled classes + resources + the
   loader-exclusive deps it injects (kotlin, atomicfu, okhttp, mcef, …), so the user attaches ONE
   `-javaagent:liquidbounce-agent-<loader>.jar` with no external classpath assembly.
@@ -154,13 +161,11 @@ Productionizing = turning those into artifacts a user can actually attach, repro
 
 ## Milestones (once greenlit — reordered by the adversarial review: risk-first, not build-first)
 
-- **P0 — the real-client / real-launcher kill-shot (gates everything).** Take the *existing*
-  Fabric agent, attach it to a **stock (intermediary-remapped) Fabric 26.2 profile in a real
-  launcher** (Prism), carrying LB's **refmap**, with **no Gradle and no `-Dlb.*` pointing at
-  `build/`** — LB's classes/resources/AT supplied from the packaged jar. One target, ~an afternoon.
-  It falsifies-or-confirms the three top objections at once (namespace/refmap, the Gradle-umbilical,
-  `-Dlb.*` self-containment). If it fails, the product's premise is wrong and every downstream
-  milestone is premature. **This was buried at P3 in the first draft; it belongs first.**
+- **P0 — namespace/refmap risk: RESOLVED (done, not a future milestone).** Runtime-tested: stock
+  production Fabric 26.2 runs on `official`/Mojmap names, no intermediary, no refmap (see the
+  namespace section + `agent-injection-mapping-test/`). 26.2 is Mojmap on all three loaders. The
+  remaining P0-equivalent risk is now purely the **Gradle-umbilical / `-Dlb.*` self-containment**
+  (P1 below) + proving against a **real launcher profile** — a packaging test, not a feasibility one.
 - **P1 — self-contained agent jar** (§D/§3): read LB's classes/resources/AT/refmap as **jar
   entries**, not `-Dlb.*` filesystem paths (`NFAgent` `FileReader(System.getProperty("lb.at"))`
   and `LBHook`'s `-Dlb.classes*` must become jar-relative reads). Prove all three with a bare
@@ -192,9 +197,13 @@ Productionizing = turning those into artifacts a user can actually attach, repro
 A reviewer attacked the plan against the results docs + agent code. Objections folded in above;
 the load-bearing ones:
 
-1. **[CRITICAL] "namespace-agnostic dev=prod" was an overclaim.** True for vanilla (26.2 Mojmap),
-   **false for Fabric** (production = intermediary; `LBHook` hardcodes `read(aw,"official")`, no
-   refmap), unverified for NeoForge. The single most dangerous untested variable → now P0.
+1. **[CRITICAL → RESOLVED] The reviewer's "production Fabric remaps to intermediary → needs refmap"
+   was itself an untested assertion — and it is FALSIFIED.** Runtime-tested (2026-07-10): stock
+   Fabric 26.2 runs on `official`/Mojmap, no intermediary (`Mappings not present!` +
+   `runtime namespace = official`, loading `net/minecraft/client/Minecraft`). The original plan's
+   "dev=prod names in 26.2" claim was, for 26.2, correct on all three loaders; the overclaim was
+   only that it was stated without proof. Now proven. (scorpion called this; the mapping layer is
+   legacy compat for pre-Mojmap versions.)
 2. **[HIGH] The proven artifact is "agent + Gradle env-assembler," not "agent jar."** The scripts
    do all classpath/dep/namespace assembly via loom/ModDevGradle; NeoForge even resolves the
    fallback deps from a live `sp.configurations.runtimeClasspath` inside the init script. An end

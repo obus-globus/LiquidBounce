@@ -1,0 +1,5 @@
+[NSPROBE] premain; fabric.development=null
+[10:41:27] [main/INFO]: Loading Minecraft 26.2 with Fabric Loader 0.19.3
+[10:41:27] [main/INFO]: Mappings not present!
+[10:41:31] [Render thread/INFO]: [STDOUT]: [NSPROBE] >>> net/minecraft/client/Minecraft IS being loaded at runtime (Mojmap name present) loader=KnotClassLoader
+[10:41:31] [Render thread/INFO]: [STDOUT]: [NSPROBE] >>> Fabric runtime namespace = official
