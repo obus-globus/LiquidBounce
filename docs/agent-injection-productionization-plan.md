@@ -141,11 +141,19 @@ Productionizing = turning those into artifacts a user can actually attach, repro
   `-javaagent:liquidbounce-agent-<loader>.jar` with no external classpath assembly.
 
 ### §C — MCEF / Via / DJL bundling, consistent across all three
-- **MCEF:** vanilla reused the Fabric `mcef` jar (works, software-rendered). Decide the canonical
-  browser artifact per target and bundle consistently. **Unmerged dependency:** the NeoForge target
-  needs `mcef-neoforge:3.3.2-26.2-SNAPSHOT` which lives only in `~/.m2` (HTTP 404 on
-  maven.ccbluex.net) — CI-red by construction; must be published or CI-prebuilt from
-  `obus-globus/mcef@neoforge-26.2`.
+- **MCEF (native NOT bundled — verified against the mcef jar's code):** the agent ships only the
+  MCEF **Java** lib (`org.cef.*` + `net.ccbluex.liquidbounce.mcef.*`, incl. the downloader); the
+  native JCEF/`libcef` is **downloaded at runtime** by `MCEFDownloadManager` — it multi-host-fetches
+  a per-platform `.tar.gz` (via okhttp) from `api.liquidbounce.net` / `api.ccbluex.net` into
+  `getPlatformDirectory()` (a per-platform cache), with `MCEFPlatform.getPlatform()` picking the
+  arch and a `PROVIDED_JCEF_PATH` override. LB triggers it in `BrowserBackendManager`. **So native-
+  blob bundling (extraction/RPATH/one-libcef-per-process) is OUT of self-containment scope** —
+  scorpion's simplification, confirmed. Remaining MCEF facts: (a) the Fabric mcef Java lib IS
+  published (ccbluex snapshots, HTTP 200), so bundling it is fine; (b) the NeoForge `mcef-neoforge`
+  Java lib is **still unpublished** (404 on both snapshots + releases; local `~/.m2` only) — must be
+  published/built from `obus-globus/mcef@neoforge-26.2`; (c) the runtime download needs network (a
+  real user has it; it's part of why MCEF didn't init on the offline VM), and software-GL MCEF
+  instability is the separate environmental caveat.
 - **Via:** functional on Fabric (ViaFabricPlus) only; present-but-inert (compiled, `isModLoaded`
   → false) on NeoForge + vanilla until a ViaForge/agent-Via path exists. State the policy; don't
   imply Via works everywhere.
@@ -209,9 +217,11 @@ Productionizing = turning those into artifacts a user can actually attach, repro
   vanilla standalone service behind "no loader found."
 - **P3 — dependency-identity map** (§C/§5): enumerate `(LB's full dep tree) ∩ (each loader's
   provided classes)` **empirically** (the `LbLoader.OWNED` list is hand-grown and provably
-  incomplete); own the intersection child-first or delegate it. Prove the **MCEF native `libcef`**
-  load path once per loader on a real GPU (native libs have process-global identity — can't be
-  loaded by two classloaders).
+  incomplete); own the intersection child-first or delegate it. **MCEF native is NOT bundled**
+  (verified — see §C): the agent ships only the MCEF *Java* lib; LB's `MCEFDownloadManager`
+  downloads the native JCEF/`libcef` at runtime. Remaining MCEF items: (a) the NeoForge
+  `mcef-neoforge` *Java* lib is unpublished (404) — must be published/built; (b) MCEF stability on a
+  real GPU is still untested under the agent.
 - **P4 — vanilla `:vanilla` subproject → custom LAUNCHER / launch-profile** (§A) — NOT a
   `-javaagent` jar (its main class is `vspike.VanillaLauncher`; the transforming CL is mandatory).
   Ship it as a launch-profile that sets its own main class + a `fail-loud` post-init assertion.
