@@ -171,15 +171,31 @@ Productionizing = turning those into artifacts a user can actually attach, repro
 
 ## Milestones (once greenlit — reordered by the adversarial review: risk-first, not build-first)
 
-- **P0 — real-launcher / zero-Gradle kill-shot (gates everything; per review-2).** Boot the
-  **Fabric** agent (cleanest: 59 LOC, no fallback loader, no native-URL nesting) against a **real
-  Prism/MultiMC instance**, hand-writing `-javaagent:lbagent.jar` + `-Dlb.*` in the launcher's
-  per-instance JVM-args box, staging LB manually — **zero Gradle, no init-script** — and reach the
-  Fly proof. It tests the two claims everything downstream rests on: (1) a stock launcher accepts
-  the agent in its JVM args, and (2) the DEFER hook fires when the classpath is the launcher's real
-  module path, not `sp.configurations.runtimeClasspath`. A failure here is a failure of the whole
-  premise, not one back-end. (Namespace sub-risk is already RESOLVED — see the mapping section — so
-  this spike is purely about launcher attachment + the Gradle-umbilical.)
+- **P0 — real-client / zero-Gradle spike: MECHANISM PROVEN (2026-07-10, run-through).** Assembled a
+  **stock production Fabric 26.2** launch by hand (`fabric.development` unset, mods discovered from a
+  real `mods/` dir = 116 mods, MC libs resolved from Mojang's manifest, fabric-loader on the
+  classpath) — **no `./gradlew`, no init-script, no `runtimeClasspath`, no `-Dlb.*` pointing at
+  `build/`** (LB staged to `/tmp/stockfab/lb`). Attached `-javaagent:lbagent.jar`. Result
+  (`agent-injection-mapping-test/fabric-stock-production-agent-proof.log`):
+  `rewrote FabricMixinBootstrap.init` → `LB added to Knot` → `applied liquidbounce.accesswidener via
+  ClassTweaker` → `added liquidbounce.mixins.json + liquidbounce-fabric.mixins.json` →
+  `Launching LiquidBounce v0.38.1` + `Loaded 36 Render Pipelines`, with LB **absent** from the
+  116-mod resource-pack list. **The DEFER hook fires and LB loads against the launcher's real module
+  path, outside Gradle** — the decisive unknown, answered YES.
+  - **What snagged (the self-containment findings the spike was meant to surface, NOT papered over):**
+    (1) LB's raw `build/classes` reference **relocated/bundled deps not in build/** — first
+    `net.ccbluex.fastutil.LfuCache` (from `fastutil4k-more-collections`), then `ai.djl.*` (DJL) —
+    each surfaced one at a time (the reactive whack-a-mole review-2 predicted). A shipped agent must
+    **bundle LB's FULL dep tree**, enumerated up front, not `-Dlb.*` + `addToClassPath` of LB's
+    classes only. (2) Deps split into **mods** (fabric-api, FLK, mcef → `mods/`) vs **libraries**
+    (kotlin, fastutil4k, okhttp, DJL → classpath/agent); `fabric-loader` carries a `fabric.mod.json`
+    but must stay on the classpath. (3) **Fly-in-world was not reached on the stock launch**: DJL was
+    still incomplete (ModelManager `<clinit>` crash cascades), and the client goes **headless** (GLFW
+    doesn't map on this VM's software-GL `:99` for Fabric — same as the earlier clean-room) so no
+    screenshot/drive. Fly itself is already proven functional on Fabric (+51 blocks) and NeoForge
+    (+33.76); the spike's job was attachment, which is proven.
+  - **Net:** user-attachable **at the mechanism level is proven**; the productionization gate is now
+    purely **self-containment** (bundle the full dep tree + split mods/libs) — P1 below.
 - **P1 — self-contained agent jar (classloader-model change, per review-2).** `LbLoader` is a
   `URLClassLoader` over **filesystem** URLs, which can't load a fat jar's **nested** jars →
   **extract bundled deps to a temp dir at premain** (like MCEF does for `libcef`) and feed real
