@@ -159,3 +159,81 @@ modules behave identically (minus MCEF).
 
 MCEF/browser UI, server-side, older MC versions, distribution/launcher UX, obfuscated
 (≤1.21.11) versions.
+
+---
+
+## Adversarial review outcome (2026-07-10) — verdict: SOUND-WITH-FIXES
+
+An adversarial sub-agent verified the plan against the codebase. Core bet holds
+(loader-clean shared code, mixin-driven boot, reachable Mixin SPI), but it caught two
+**load-bearing omissions** and firmed up the artifact list. Revisions folded in below.
+
+### New showstoppers to handle (were missing)
+
+1. **AccessWidener must be applied by the agent itself.** `src/main/resources/
+   liquidbounce.accesswidener` has **131 directives** (accessible/mutable/extendable).
+   Loom applies it on Fabric; `ConvertAccessWidenerTask` → AT on NeoForge. Under a bare
+   `-javaagent` *nothing* applies it, and 14 `@Accessor`/`@Invoker` mixins + shared
+   Kotlin touch widened members (`Minecraft.user`, `LocalPlayer.xLast`, packet fields).
+   Without it: `IllegalAccessError`/`NoSuchFieldError`. **Mixin 0.8.7 does NOT process
+   AWs** — it's a loader feature. → The agent's `ClassFileTransformer` must parse the AW
+   and widen access flags **in-band, before the Mixin transform**. This is real net-new
+   code, not a shim.
+
+2. **Exact artifacts to bundle in the fat jar** (plan said "Mixin + MixinExtras" —
+   too vague):
+   - `net.fabricmc:sponge-mixin:0.17.3+mixin.0.8.7` — the **Fabric fork**, not upstream
+     `org.spongepowered:mixin`. Only the fork has `CompatibilityLevel.JAVA_25` (verified
+     present in 0.17.3, absent in bare 0.8). This is the version LB resolves.
+   - unshaded **ASM ≥ 9.7** (`asm`, `asm-tree`, `asm-commons`, `asm-analysis`, `asm-util`)
+     — sponge-mixin does not shade ASM; the loader normally supplies it. Java 25 = class
+     file v69, needs 9.7+.
+   - Set `-Dmixin.bootstrapService=<our service>`.
+
+3. **Standalone `IMixinService` is the largest new component** — 24 abstract methods +
+   an `IClassBytecodeProvider.getClassNode` that must return an ASM tree for *any* class
+   Mixin inspects (for `@Shadow`/superclass resolution). No Instrumentation service ships
+   (only LaunchWrapper/ModLauncher). Feasible (Weave precedent; read
+   `name.replace('.','/')+".class"` from the app loader), but not "minimal".
+
+4. **GraalJS/Truffle classloader placement** — Truffle discovers languages via
+   `ServiceLoader` on a specific loader and is picky. A `-javaagent` fat jar lands on the
+   system/app loader; unverified whether Truffle accepts that. May need the agent on the
+   classpath / `-Xbootclasspath/a`, not just `-javaagent`.
+
+### Extra linking gaps (classes must be on classpath even when runtime-guarded)
+
+- **ViaVersion** (`com.viaversion.*`) is imported directly in shared non-mixin Kotlin
+  (`utils/network/LegacyPacket.kt`, `PlayerSneakPacket.kt`, `PickFromInventoryPacket.kt`,
+  `OpenInventorySilentlyPacket.kt`, `utils/client/vfp/*`, `utils/client/ProtocolUtil.kt`).
+  Runtime-guarded by `isModLoaded("viafabricplus")` so it degrades, **but the classes
+  must link** → bundle Via (or stubs), or exclude these files from `:vanilla`.
+- **MCEF/JCEF** (`org.cef.*`, `mcef.*`) is hard-linked in
+  `integration/backend/backends/cef/CefBrowserBackend.kt` — deferring MCEF means the
+  *class* must be excluded/stubbed, not merely "falls back".
+- **DJL** (`ai.djl.*`) hard-linked in `deeplearn/*` — a `jij` dep to carry into `:vanilla`.
+- **Lithium superclass link** — `MixinChunkAwareBlockCollisionSweeperBlockPos extends`
+  a Lithium class; `@Pseudo` covers the target but not the mixin's own superclass →
+  possible `NoClassDefFoundError` sans Lithium. NEEDS-VERIFY, but identical on
+  Fabric-without-Lithium today, so not vanilla-specific.
+
+### Mixin version (confirmed)
+
+`net.fabricmc:sponge-mixin:0.17.3+mixin.0.8.7` (Mixin core 0.8.7, Fabric fork; resolved
+transitively via loom, not pinned). Standalone Instrumentation service is feasible: SPI
+intact, discovery honors `mixin.bootstrapService` then `ServiceLoader`,
+`IMixinTransformer.transformClassBytes` is the public per-class entry.
+
+### REVISED BUILD ORDER — spike first (supersedes P0→P1 above)
+
+**P-SPIKE (do before any Gradle scaffolding):** a ~150-line throwaway agent that, under
+`-javaagent` on the **raw piston vanilla 26.2 client jar**:
+(a) bootstraps Fabric `sponge-mixin:0.17.3+mixin.0.8.7` + ASM via a minimal
+Instrumentation `IMixinService`,
+(b) applies the 131-directive `liquidbounce.accesswidener` in the same transformer,
+(c) applies ONE trivial mixin that injects a `println` into `Minecraft.<init>` **and**
+reads one AW-widened field (`Minecraft.user`).
+*Accept:* the launch prints the line and reads the widened field with **no**
+`IllegalAccessError`. This retires showstoppers #1–#4 at once. Only then build `:vanilla`.
+Also run a standalone `Context.newBuilder("js").build()` from inside the agent to retire
+the Truffle risk before trusting the script subsystem.
