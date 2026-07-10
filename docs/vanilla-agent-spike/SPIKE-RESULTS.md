@@ -173,3 +173,31 @@ UI use. The vanilla-agent infrastructure (classloader/mixin/AW) ran clean throug
 the crash was entirely inside CEF native code.
 
 **Not tested:** a module *settings* value-change (the CEF crash cut the session short).
+
+---
+
+## Fallbacks fixed + behavioral confirmation (movement module MOVES the player)
+
+The `LVTGeneratorError` fallbacks were caused by the agent's bytecode provider feeding
+Mixin's `ClassInfo` the ORIGINAL class while injectors target methods LB's AccessWidener
+makes accessible. Fix: `VSpikeBytecodeProvider` applies the same AW to metadata reads.
+**Result: ZERO mixin fallbacks in-world** (verified across multiple runs) — LB source
+unchanged (agent-side fix). So `MixinLocalPlayer`'s 17 player-event dispatches now run.
+
+**Behavioral proof (the real bar):** in a **survival** superflat world (Fly module
+pre-enabled via config), holding jump raised the player from **Y=-60 to Y=-8.64 (+51
+blocks)** and left them airborne high above the ground — see
+`lb-module-fly-before-y-60.png` (grounded, Y=-60) and `lb-module-fly-after-y-9.png`
+(flying, Y=-8.64). Vanilla survival can't do this; the LB Fly module is functioning,
+which means `PlayerMoveEvent`/`PlayerNetworkMovementTickEvent`/`PlayerTickEvent` (the
+`MixinLocalPlayer`-only events that were dead before the fix) now fire. Render (Xray)
+was already confirmed; movement is now confirmed too.
+
+**MCEF/software-GL stability (important VM caveat):** the MCEF UI (ClickGUI *and* the
+world-select menu) crashes very easily under interaction on this VM's software GL
+(llvmpipe libcef SIGILL) — hit repeatedly while trying to drive modules via the GUI.
+The behavioral test above deliberately avoided the ClickGUI (module pre-enabled via
+config; movement via keyboard). On a real GPU this Chromium fragility is expected gone,
+but **on this VM the ClickGUI is a landmine** — enable modules via config/keybind/chat
+command instead. (The module *settings* value-change test was not safely completable for
+this reason.)
