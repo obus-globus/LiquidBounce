@@ -33,10 +33,33 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class NFProbe {
 
     static final String TARGET = "net/minecraft/client/Minecraft";
+    static final String TARGET_FACADE = "net/neoforged/fml/loading/mixin/MixinFacade";
     static final ClassDesc CD_System = ClassDesc.of("java.lang.System");
     static final ClassDesc CD_PrintStream = ClassDesc.of("java.io.PrintStream");
     static final ClassDesc CD_String = ClassDesc.of("java.lang.String");
+    static final ClassDesc CD_Object = ClassDesc.of("java.lang.Object");
+    static final ClassDesc CD_Class = ClassDesc.of("java.lang.Class");
+    static final ClassDesc CD_ClassLoader = ClassDesc.of("java.lang.ClassLoader");
+    static final ClassDesc CD_URL = ClassDesc.of("java.net.URL");
+    static final ClassDesc CD_MixinService = ClassDesc.of("org.spongepowered.asm.service.MixinService");
+    static final ClassDesc CD_IMixinService = ClassDesc.of("org.spongepowered.asm.service.IMixinService");
     static final MethodTypeDesc MTD_println = MethodTypeDesc.of(ClassDesc.ofDescriptor("V"), CD_String);
+    static final MethodTypeDesc MTD_getService = MethodTypeDesc.of(CD_IMixinService);
+    static final MethodTypeDesc MTD_getClass = MethodTypeDesc.of(CD_Class);
+    static final MethodTypeDesc MTD_getName = MethodTypeDesc.of(CD_String);
+    static final MethodTypeDesc MTD_getResource = MethodTypeDesc.of(CD_URL, CD_String);
+    static final MethodTypeDesc MTD_valueOf = MethodTypeDesc.of(CD_String, CD_Object);
+    // Tier-2 registration
+    static final ClassDesc CD_void = ClassDesc.ofDescriptor("V");
+    static final ClassDesc CD_byteArr = ClassDesc.ofDescriptor("[B");
+    static final ClassDesc CD_InputStream = ClassDesc.of("java.io.InputStream");
+    static final ClassDesc CD_FMLMixinService = ClassDesc.of("net.neoforged.fml.loading.mixin.FMLMixinService");
+    static final ClassDesc CD_Mixins = ClassDesc.of("org.spongepowered.asm.mixin.Mixins");
+    static final MethodTypeDesc MTD_getResourceAsStream = MethodTypeDesc.of(CD_InputStream, CD_String);
+    static final MethodTypeDesc MTD_readAllBytes = MethodTypeDesc.of(CD_byteArr);
+    static final MethodTypeDesc MTD_addContent = MethodTypeDesc.of(CD_void, CD_String, CD_byteArr);
+    static final MethodTypeDesc MTD_addConfiguration = MethodTypeDesc.of(CD_void, CD_String);
+    static final String NF_CONFIG = "nfspike.mixins.json";
     static final AtomicBoolean firstClientSeen = new AtomicBoolean(false);
 
     public static void premain(String args, Instrumentation inst) {
@@ -60,7 +83,36 @@ public final class NFProbe {
                         + " loader=" + loaderName(loader) + " module=" + moduleName(module));
             }
 
+            // Tier-2 diagnostic: hook MixinFacade.finishInitialization to test the DEFER window.
+            if (TARGET_FACADE.equals(className)) {
+                System.out.println("[NFPROBE] *** transform() SAW " + className + " (Tier-2 mixin seam) ***");
+                try {
+                    ClassFile cf = ClassFile.of();
+                    ClassModel cm = cf.parse(buf);
+                    ClassTransform ct = (cb, cle) -> {
+                        if (cle instanceof MethodModel mm && mm.methodName().equalsString("finishInitialization")) {
+                            cb.transformMethod(mm, MethodTransform.transformingCode(facadeDiag()));
+                        } else {
+                            cb.accept(cle);
+                        }
+                    };
+                    byte[] out = cf.transformClass(cm, ct);
+                    System.out.println("[NFPROBE] hooked MixinFacade.finishInitialization (" + buf.length + " -> " + out.length + ")");
+                    return out;
+                } catch (Throwable t) {
+                    System.out.println("[NFPROBE] MixinFacade hook FAILED: " + t);
+                    return null;
+                }
+            }
+
             if (!TARGET.equals(className)) return null;
+
+            // Tier-2 clean-proof mode: don't raw-transform Minecraft ourselves, so a [NFMIXIN] line
+            // is unambiguous proof the AGENT-REGISTERED MIXIN applied (not our raw transform).
+            if (System.getProperty("nfprobe.rawMc") == null) {
+                System.out.println("[NFPROBE] SAW Minecraft (raw transform OFF; only agent-registered mixin acts)");
+                return null;
+            }
 
             System.out.println("[NFPROBE] *** transform() SAW " + className
                     + " loader=" + loaderName(loader) + " module=" + moduleName(module) + " ***");
@@ -107,6 +159,61 @@ public final class NFProbe {
             public void accept(CodeBuilder cob, CodeElement e) {
                 cob.accept(e);
             }
+        };
+    }
+
+    /** Injected at head of MixinFacade.finishInitialization(this=0, LoadingModList=1, TransformingClassLoader=2). */
+    static CodeTransform facadeDiag() {
+        return new CodeTransform() {
+            @Override
+            public void atStart(CodeBuilder cob) {
+                // (1) prove the hook runs
+                cob.getstatic(CD_System, "out", CD_PrintStream)
+                   .ldc("[NFREG] MixinFacade.finishInitialization HOOKED by premain agent — testing DEFER window")
+                   .invokevirtual(CD_PrintStream, "println", MTD_println);
+                // (2) prove MixinService.getService() is live + which impl (want FMLMixinService)
+                cob.getstatic(CD_System, "out", CD_PrintStream)
+                   .ldc("[NFREG] MixinService.getService() = ")
+                   .invokevirtual(CD_PrintStream, "print", MTD_println);
+                cob.getstatic(CD_System, "out", CD_PrintStream)
+                   .invokestatic(CD_MixinService, "getService", MTD_getService, false)
+                   .invokevirtual(CD_Object, "getClass", MTD_getClass)
+                   .invokevirtual(CD_Class, "getName", MTD_getName)
+                   .invokevirtual(CD_PrintStream, "println", MTD_println);
+                // (3) can the TransformingClassLoader (param 2) resolve a resource from the agent classpath?
+                //     if non-null, a mixin class on the agent classpath is reachable by FML's bytecode provider.
+                cob.getstatic(CD_System, "out", CD_PrintStream)
+                   .ldc("[NFREG] TransformingClassLoader.getResource(nfprobe/NFProbe.class) = ")
+                   .invokevirtual(CD_PrintStream, "print", MTD_println);
+                cob.getstatic(CD_System, "out", CD_PrintStream)
+                   .aload(2)
+                   .ldc("nfprobe/NFProbe.class")
+                   .invokevirtual(CD_ClassLoader, "getResource", MTD_getResource)
+                   .invokestatic(CD_String, "valueOf", MTD_valueOf, false)
+                   .invokevirtual(CD_PrintStream, "println", MTD_println);
+
+                // (4) THE REAL REGISTRATION — inline, so it uses FML's own view of these classes
+                //     (avoids the classloader-duplication trap). Equivalent to:
+                //       FMLMixinService svc = (FMLMixinService) MixinService.getService();
+                //       byte[] cfg = ((ClassLoader)tcl).getResourceAsStream(NF_CONFIG).readAllBytes();
+                //       svc.addMixinConfigContent(NF_CONFIG, cfg);
+                //       Mixins.addConfiguration(NF_CONFIG);
+                cob.invokestatic(CD_MixinService, "getService", MTD_getService, false)
+                   .checkcast(CD_FMLMixinService)
+                   .ldc(NF_CONFIG)
+                   .aload(2)
+                   .ldc(NF_CONFIG)
+                   .invokevirtual(CD_ClassLoader, "getResourceAsStream", MTD_getResourceAsStream)
+                   .invokevirtual(CD_InputStream, "readAllBytes", MTD_readAllBytes)
+                   .invokevirtual(CD_FMLMixinService, "addMixinConfigContent", MTD_addContent);
+                cob.ldc(NF_CONFIG)
+                   .invokestatic(CD_Mixins, "addConfiguration", MTD_addConfiguration, false);
+                cob.getstatic(CD_System, "out", CD_PrintStream)
+                   .ldc("[NFREG] registered " + NF_CONFIG + " into live FMLMixinService + Mixins.addConfiguration — agent, not a mod")
+                   .invokevirtual(CD_PrintStream, "println", MTD_println);
+            }
+            @Override
+            public void accept(CodeBuilder cob, CodeElement e) { cob.accept(e); }
         };
     }
 

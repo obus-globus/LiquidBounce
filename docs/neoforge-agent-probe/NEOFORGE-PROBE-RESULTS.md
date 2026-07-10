@@ -62,5 +62,77 @@ docs/neoforge-agent-probe/  →  build the agent, then run with the init script:
 
 ---
 
-## Tier 2 — Mixin-DEFER path (does the *real* LB mechanism work?) — IN PROGRESS
-<!-- filled in after the FMLMixinService registration probe -->
+## Tier 2 — Mixin-DEFER: agent registers a Mixin into FML's live service — **GREEN**
+
+The real LB mechanism is Mixin, not raw transforms. Tested whether a premain agent can register
+a Mixin config into FML's **live** mixin service without a ModFile — the DEFER approach that worked
+on Fabric (`Mixins.addConfiguration` into the loader's own service).
+
+**Verified from the loader jar (`javap`), not assumed:**
+- `FMLMixinService.addMixinConfigContent(String, byte[])` buffers config bytes in a
+  `Map<String,byte[]> mixinConfigContents`; `getResourceAsStream` checks that buffer **first**,
+  then falls back to the context classloader → a buffered config needs no classpath entry.
+- `MixinFacade.finishInitialization(LoadingModList, TransformingClassLoader)` runs
+  `addMixins` → `gotoPhase(INIT)` → `gotoPhase(DEFAULT)` → `MixinBootstrap.init()` →
+  `getPlatform().inject()`. Registering a config at the head (before `inject()`) is honored.
+- `FMLClassBytecodeProvider.getClassNode` loads mixin **class** bytes via FML's `BytecodeProvider`,
+  else `Thread.getContextClassLoader().getResource(name+".class")`.
+
+**Diagnostic (all confirmed live):**
+```
+[NFREG] MixinFacade.finishInitialization HOOKED by premain agent
+[NFREG] MixinService.getService() = net.neoforged.fml.loading.mixin.FMLMixinService
+[NFREG] TransformingClassLoader.getResource(nfprobe/NFProbe.class) = jar:file:/tmp/nfprobe.jar!/…
+```
+The last line is decisive: the transforming loader resolves classes straight from the **agent jar**,
+so the mixin class is reachable by FML's bytecode provider — the class-visibility problem that forced
+`addToClassPath` on Fabric does not exist here.
+
+**Probe:** the agent hooks `MixinFacade.finishInitialization` (inline bytecode, so it uses FML's own
+view of the Mixin classes — avoids the classloader-duplication trap) and calls
+`FMLMixinService.addMixinConfigContent(name, bytes)` + `Mixins.addConfiguration(name)`. The trivial
+`@Mixin(targets="net.minecraft.client.Minecraft") @Inject(method="run", at=HEAD)` and its config live
+in the agent jar. Raw Tier-1 Minecraft transform disabled (`-Dnfprobe.rawMc` unset) so the proof is
+purely the mixin.
+
+**Result** (`nf-probe-tier2-mixin-proof.log`), LB deregistered (mod list =
+sodium/lithium/mcef/immediatelyfast/neoforge, **no liquidbounce**):
+```
+[NFREG] registered nfspike.mixins.json into live FMLMixinService + Mixins.addConfiguration — agent, not a mod
+[NFMIXIN] >>> agent-registered MIXIN fired inside net.minecraft.client.Minecraft.run
+          on a LIVE NeoForge install — registered via FMLMixinService by a premain agent, NOT a mod <<<
+Sound engine started   ← boot healthy
+```
+
+**A premain agent registered a Mixin into FML's live service, with no ModFile, and it applied to
+Minecraft.** This is the exact mechanism LB needs.
+
+---
+
+## VERDICT: **YES** — NeoForge agent-injection is feasible (evidence-backed)
+
+Both the fundamental capability (Tier 1: transform Minecraft) and the real LB mechanism (Tier 2:
+register a Mixin into FML's live service without a mod) are proven on a live NeoForge 26.2 install.
+The prior static seam-map's "NO" rested on three claims, **all empirically false**:
+- "premain transformer can't hook Minecraft (timing / sealed layer)" — it does (Tier 1);
+- "mixin configs locked at init, no late window" — `finishInitialization` head injection is honored (Tier 2);
+- "mixin class needs a ModFile / classloader-isolated" — the transforming loader resolves the agent jar directly.
+
+**Remaining engineering for full LB-on-NeoForge-via-agent** (mechanism proven, scope is build-out,
+mirrors the Fabric interposer):
+- register LB's real configs (`liquidbounce.mixins.json` + `liquidbounce-neoforge.mixins.json`) the
+  same way, and make LB's classes + kotlin runtime + resources resolvable by the transforming loader
+  (they resolve from the agent/launch classpath, as the `getResource` test shows);
+- apply LB's **AccessTransformers** (NeoForge uses ATs, converted from LB's AccessWidener by the build's
+  `convertAccessWidener`) — the NeoForge analogue of the Fabric ClassTweaker step;
+- MixinExtras is already present at runtime (0.5.4); dev namespace is mojmap so no refmap is needed in
+  dev (a production install would ship LB's refmap).
+
+## Reproduce Tier 2
+```
+docs/neoforge-agent-probe/
+  javac --release 25 -d out src/nfprobe/NFProbe.java
+  javac --release 25 -cp <mixin-0.8.jar> -d out src/nfspike/MixinNfMc.java
+  cp src/nfspike.mixins.json out/ ; jar cfm /tmp/nfprobe.jar <manifest> -C out .
+  ./gradlew :neoforge:runClient --init-script nf-probe.gradle   # LB deregistered; watch for [NFMIXIN]
+```

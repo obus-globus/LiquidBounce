@@ -1,0 +1,11 @@
+13:[NFPROBE-INIT] cleared ModFoldersProvider (LB deregistered as mod); nfprobe agent attached
+32:[NFPROBE] premain fired — java=25.0.3 retransformSupported=true redefineSupported=true
+63:[NFPROBE] hooked MixinFacade.finishInitialization (14486 -> 15382)
+78:[NFREG] MixinFacade.finishInitialization HOOKED by premain agent — testing DEFER window
+79:[NFREG] MixinService.getService() = net.neoforged.fml.loading.mixin.FMLMixinService
+80:[NFREG] TransformingClassLoader.getResource(nfprobe/NFProbe.class) = jar:file:/tmp/nfprobe.jar!/nfprobe/NFProbe.class
+82:[NFREG] registered nfspike.mixins.json into live FMLMixinService + Mixins.addConfiguration — agent, not a mod
+100:[08:47:52] [Render thread/INFO] [minecraft/Minecraft]: Setting user: Dev
+106:[08:47:53] [Render thread/INFO] [minecraft/ReloadableResourceManager]: Reloading ResourceManager: vanilla, mod_resources, mod/sodium, mod/lithium, mod/mcef, mod/immediatelyfast, mod/neoforge
+107:[NFMIXIN] >>> agent-registered MIXIN fired inside net.minecraft.client.Minecraft.run on a LIVE NeoForge install — registered via FMLMixinService by a premain agent, NOT a mod <<<
+118:[08:47:55] [Render thread/INFO] [minecraft/SoundEngine]: Sound engine started
