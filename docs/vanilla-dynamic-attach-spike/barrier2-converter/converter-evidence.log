@@ -1,0 +1,15 @@
+# Barrier 2 converter — live evidence (2026-07-10)
+## Kill-shot: schema-changing mixin retro-applied to an ALREADY-LOADED class in a live MC
+[CONVERT] target net.minecraft.client.Minecraft loaded=true retransformSupported=true
+[CONVERT] retransformClasses(ALREADY-LOADED Minecraft) SUCCESS — schema-neutral body-only patch applied live
+[CONVERT][LIVE] LBHooks.onTick fired 100x on net.minecraft.client.Minecraft@2021971138 — external-field state=100 (schema-changing mixin retro-applied to ALREADY-LOADED class)
+[CONVERT][LIVE] LBHooks.onTick fired 200x on net.minecraft.client.Minecraft@2021971138 — external-field state=200 (schema-changing mixin retro-applied to ALREADY-LOADED class)
+[CONVERT][LIVE] LBHooks.onTick fired 300x on net.minecraft.client.Minecraft@2021971138 — external-field state=300 (schema-changing mixin retro-applied to ALREADY-LOADED class)
+[CONVERT][LIVE] LBHooks.onTick fired 400x on net.minecraft.client.Minecraft@2021971138 — external-field state=400 (schema-changing mixin retro-applied to ALREADY-LOADED class)
+[CONVERT][LIVE] LBHooks.onTick fired 500x on net.minecraft.client.Minecraft@2021971138 — external-field state=500 (schema-changing mixin retro-applied to ALREADY-LOADED class)
+[CONVERT][LIVE] LBHooks.onTick fired 600x on net.minecraft.client.Minecraft@2021971138 — external-field state=600 (schema-changing mixin retro-applied to ALREADY-LOADED class)
+[CONVERT][LIVE] LBHooks.onTick fired 700x on net.minecraft.client.Minecraft@2021971138 — external-field state=700 (schema-changing mixin retro-applied to ALREADY-LOADED class)
+[CONVERT][LIVE] LBHooks.onTick fired 800x on net.minecraft.client.Minecraft@2021971138 — external-field state=800 (schema-changing mixin retro-applied to ALREADY-LOADED class)
+
+## LB mixin construct census (159 files):
+  @Inject-family handlers: 132 | @Unique fields: 37 | @Accessor/@Invoker: 14 | interface-adders: 17 | @Local: 26
