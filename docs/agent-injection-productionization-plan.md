@@ -106,10 +106,19 @@ Productionizing = turning those into artifacts a user can actually attach, repro
 ### §B — Fabric + NeoForge agent artifacts → proper packaging
 - The Fabric/NeoForge agents are premain jars + a Gradle init-script that (i) deregisters LB as a
   dev mod and (ii) attaches `-javaagent`. **Dev-only today** (init-script targets loom/ModDevGradle
-  `runClient`). For a real install the agent attaches to the launcher's JVM args — the hook logic
-  is namespace-agnostic (dev = mojmap = production names in 26.2), but this must be **built and
-  proven against a production Fabric/NeoForge launcher**, not just the dev `runClient`. This is an
-  unproven gap: **dev-`runClient` ≠ a packaged installer/launcher-profile.**
+  `runClient`). For a real install the agent attaches to the launcher's JVM args — but this is
+  **unproven against a production launcher**, and the **mapping namespace is NOT uniform** (see the
+  CRITICAL objection below):
+  - **vanilla** — MC 26.2 ships **Mojmap/official even in production** (verified: `client_mappings`
+    absent, jar sha1 matches manifest). LB's AW/mixins target official → **prod = dev, no refmap
+    needed.** The one production-safe target.
+  - **Fabric** — production Fabric remaps MC to **intermediary** at runtime. The dev spike only
+    worked because loom sets the namespace to `official`, and `LBHook` **hardcodes**
+    `ClassTweakerReader…read(aw, "official")`. On a real Fabric install LB's mixins/AW target names
+    that don't exist → **LB needs its refmap + the intermediary remap the loader does in dev.
+    UNPROVEN and load-bearing.**
+  - **NeoForge** — 26.2 runtime uses Mojmap names, so likely prod = dev, **but the AT/mixin refmap
+    situation is unverified** against a real NeoForge install (only dev `runClient` was tested).
 - Package each agent as a self-contained jar that carries LB's compiled classes + resources + the
   loader-exclusive deps it injects (kotlin, atomicfu, okhttp, mcef, …), so the user attaches ONE
   `-javaagent:liquidbounce-agent-<loader>.jar` with no external classpath assembly.
@@ -143,17 +152,68 @@ Productionizing = turning those into artifacts a user can actually attach, repro
   `mavenLocal()`; unqualified `./gradlew build` fans out to the heavy agent build). Opt-in vs
   aggregate is a P0 decision.
 
-## Milestones (once greenlit — not now)
+## Milestones (once greenlit — reordered by the adversarial review: risk-first, not build-first)
 
-P0 publish/prebuild `mcef-neoforge` (unblocks NeoForge CI, LB-code-free) → P1 decide distribution
-surface (§D) + opt-in/aggregate → P2 `:vanilla` subproject + fat agent jar (§A) → P3 package the
-Fabric/NeoForge agents + prove against a **production** launcher, not just dev `runClient` (§B) →
-P4 bundling consistency (§C) → P5 CI for all three.
+- **P0 — the real-client / real-launcher kill-shot (gates everything).** Take the *existing*
+  Fabric agent, attach it to a **stock (intermediary-remapped) Fabric 26.2 profile in a real
+  launcher** (Prism), carrying LB's **refmap**, with **no Gradle and no `-Dlb.*` pointing at
+  `build/`** — LB's classes/resources/AT supplied from the packaged jar. One target, ~an afternoon.
+  It falsifies-or-confirms the three top objections at once (namespace/refmap, the Gradle-umbilical,
+  `-Dlb.*` self-containment). If it fails, the product's premise is wrong and every downstream
+  milestone is premature. **This was buried at P3 in the first draft; it belongs first.**
+- **P1 — self-contained agent jar** (§D/§3): read LB's classes/resources/AT/refmap as **jar
+  entries**, not `-Dlb.*` filesystem paths (`NFAgent` `FileReader(System.getProperty("lb.at"))`
+  and `LBHook`'s `-Dlb.classes*` must become jar-relative reads). Prove all three with a bare
+  `java -javaagent:… Main`, zero Gradle.
+- **P2 — unified entry point + host detection** (§D): today there are three separate hardcoded
+  `Premain-Class` agents; the "one agent, detect vanilla/Fabric/NeoForge, three back-ends" is
+  **net-new and unbuilt** — detect by resource probe before touching loader classes, gate the
+  vanilla standalone service behind "no loader found."
+- **P3 — dependency-identity map** (§C/§5): enumerate `(LB's full dep tree) ∩ (each loader's
+  provided classes)` **empirically** (the `LbLoader.OWNED` list is hand-grown and provably
+  incomplete); own the intersection child-first or delegate it. Prove the **MCEF native `libcef`**
+  load path once per loader on a real GPU (native libs have process-global identity — can't be
+  loaded by two classloaders).
+- **P4 — `:vanilla` Gradle subproject + fat agent jar** (§A) — real but now *after* the risk is
+  retired; the vanilla target is production-safe on namespace, so it's the lowest-risk build-out.
+- **P5 — CI (scoped honestly, §E):** build + boot-to-mixin-apply asserted via log markers
+  (`registered LB mixin configs`, `loaded LB AccessTransformer`); **functional / MCEF / in-world
+  verification goes on a GPU runner or a manual gate — it CANNOT run headless** (software-GL MCEF
+  SIGILLs). Publishing `mcef-neoforge` unblocks the *build* job but does not make CI prove function.
 
 ## Explicitly NOT in this plan / known gaps
-- Fixing the software-GL MCEF crash (environmental).
+- Fixing the software-GL MCEF crash (environmental) — and note it blocks headless functional CI.
 - ViaForge / agent-Via functional protocol translation.
-- Proving the agents against a **production** launcher (only dev `runClient` is proven) — this is
-  the single biggest untested assumption in productionization.
 - Whether to migrate NeoForge to the single-loader (game-layer module) architecture vs keep the
   proven fallback loader.
+
+## Adversarial review outcome (verdict: NEEDS-MAJOR-REWORK on productionization; mechanism sound)
+
+A reviewer attacked the plan against the results docs + agent code. Objections folded in above;
+the load-bearing ones:
+
+1. **[CRITICAL] "namespace-agnostic dev=prod" was an overclaim.** True for vanilla (26.2 Mojmap),
+   **false for Fabric** (production = intermediary; `LBHook` hardcodes `read(aw,"official")`, no
+   refmap), unverified for NeoForge. The single most dangerous untested variable → now P0.
+2. **[HIGH] The proven artifact is "agent + Gradle env-assembler," not "agent jar."** The scripts
+   do all classpath/dep/namespace assembly via loom/ModDevGradle; NeoForge even resolves the
+   fallback deps from a live `sp.configurations.runtimeClasspath` inside the init script. An end
+   user has no Gradle. Severing this umbilical (P1) is bigger than the `:vanilla` subproject.
+3. **[HIGH] `-Dlb.*` are dev-artifact paths** the init scripts set; a packaged agent has no one to
+   set them → must self-supply from the jar (P1).
+4. **[HIGH] Unified host-detecting agent is unbuilt** — three separate agents today (P2).
+5. **[MED-HIGH] Bundling is recurring `LinkageError`, not a one-time choice.** `OWNED` is
+   hand-grown (ahocorasick/okhttp added reactively after failures); MCEF native `libcef` identity
+   is untested across loaders and `mcef-neoforge` is unpublished (P3).
+6. **[MED] CI can't prove function headlessly** (P5 scoped accordingly).
+7. **[MED] "DEFER is the only viable strategy" / fallback "lower-risk" are stated stronger than
+   proven** (DEFER proven for the two loaders; fallback needed three reentrancy guards + surfaced
+   the whole LinkageError chain — earned, not inherent).
+
+**Confirmed NOT overclaimed:** the Fly evidence (+51 blocks Fabric, +33.76 NeoForge) checks out
+against the results docs with before/after screenshots. **Under-disclosed:** vanilla's "0
+fallbacks" required the `MixinLocalPlayer` fix (17 core events); the same `@Local`/named-LVT
+fragility is a production risk against any client whose LVT differs from the dev jar.
+
+**Bank point:** this plan is reviewed and grounded. No build until scorpion greenlights — and if he
+does, **P0 (real-launcher Fabric spike) first**, because it can invalidate everything downstream.
