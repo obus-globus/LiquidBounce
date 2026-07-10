@@ -1,3 +1,5 @@
+> **SUPERSEDED** by `agent-injection-productionization-plan.md` (2026-07-10). Agent-injection is now proven in-world on all three loaders (vanilla/Fabric/NeoForge), which falsifies this doc's framing (three build targets / NeoForge non-starter). Kept for history.
+
 # LiquidBounce across Fabric + NeoForge + Vanilla-agent — plan
 
 Branch: `feat/vanilla-agent`. **Plan only — no building until reviewed.**
