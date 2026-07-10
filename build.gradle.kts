@@ -458,3 +458,79 @@ tasks.register<Jar>("fabricSelfContainedAgentJar") {
         })
     }
 }
+
+// ===== Self-contained vanilla agent (productionization; docs/vanilla-agent-selfcontained) =====
+// One fat jar that runs LiquidBounce on UNMODIFIED vanilla MC via a transforming classloader (no
+// -javaagent, no Gradle, no hand-assembled classpath). Root layer = the Mixin framework
+// (sponge-mixin + ASM + MixinExtras + the VSpike standalone service) + the VanillaLauncher main class.
+// agent-libs/ = LB classes/resources + LB-owned dep tree, extracted to temp + loaded at launch.
+sourceSets {
+    create("vspike") {
+        java.srcDir("docs/vanilla-agent-selfcontained/src")
+        compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
+    }
+}
+val vspikeMixinExtras: Configuration by configurations.creating { isTransitive = false }
+dependencies { vspikeMixinExtras("io.github.llamalad7:mixinextras-common:0.5.4") }
+
+tasks.register<Jar>("lbClassesForVanilla") {
+    dependsOn("classes", "processResources", "vspikeClasses")
+    archiveFileName.set("liquidbounce.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("agent-vanilla/tmp"))
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from("docs/vanilla-agent-selfcontained/lb-override")   // Platform SPI override (VanillaPlatform) FIRST so it wins
+    from(sourceSets.main.get().output) { exclude("META-INF/services/net.ccbluex.liquidbounce.platform.Platform") }
+    from(sourceSets["vspike"].output) { include("net/ccbluex/**") }   // VanillaPlatform (loaded+transformed with LB)
+}
+
+tasks.register<Jar>("vanillaSelfContainedAgentJar") {
+    group = "liquidbounce"
+    description = "Single self-contained fat jar: main-class launcher + Mixin framework + LB + dep tree."
+    dependsOn("vspikeClasses", "lbClassesForVanilla")
+    archiveFileName.set("liquidbounce-agent-vanilla.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("agent-vanilla"))
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    val asmJars = configurations.runtimeClasspath.get().files.filter { it.name.matches(Regex("asm(-\\w+)?-\\d.*\\.jar")) }
+    val spongeJar = configurations.runtimeClasspath.get().files.filter { it.name.startsWith("sponge-mixin") }
+    val asmVer = asmJars.first { it.name.matches(Regex("asm-\\d.*\\.jar")) }.name.removePrefix("asm-").removeSuffix(".jar")
+    manifest {
+        attributes("Main-Class" to "vspike.VanillaLauncher", "Premain-Class" to "vspike.Agent",
+                   "Can-Retransform-Classes" to "true", "Can-Redefine-Classes" to "true")
+        // Mixin's CompatibilityLevel.JAVA_25 check reads ASM's manifest Implementation-Version; pin it.
+        attributes(mapOf("Implementation-Title" to "ASM", "Implementation-Version" to asmVer), "org/objectweb/asm/")
+    }
+    // (a) Mixin framework unpacked at root (ASM first so 9.x wins); drop rival service files/signatures/module-info.
+    val infra = asmJars + spongeJar + vspikeMixinExtras.files
+    from(infra.map { zipTree(it) }) {
+        exclude("META-INF/services/**", "module-info.class", "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "META-INF/MANIFEST.MF")
+    }
+    // (b) vspike launcher/service classes at root (net.ccbluex went into the LB jar instead)
+    from(sourceSets["vspike"].output) { exclude("net/ccbluex/**") }
+    // (c) our standalone-Mixin-service registrations + the optional test config
+    from("docs/vanilla-agent-selfcontained/agent-meta")
+    from("docs/vanilla-agent-selfcontained/src/vspike.mixins.json")
+    // (d) LB payload under agent-libs/: LB classes jar + LB-owned deps. Drop the bare-vanilla platform
+    //     (piston libs), the Mixin infra (asm/mixinextras, at root) and the Fabric loader ecosystem/mods.
+    val dropGroups = setOf(
+        "org.lwjgl", "io.netty", "com.mojang", "org.apache.logging.log4j", "org.apache.commons",
+        "net.java.dev.jna", "org.slf4j", "org.jspecify", "org.joml", "org.jcraft", "net.sf.jopt-simple",
+        "it.unimi.dsi", "com.google.guava", "com.ibm.icu", "com.github.oshi", "commons-io", "commons-codec",
+        "com.google.code.gson", "com.azure", "com.microsoft.azure", "org.ow2.asm", "io.github.llamalad7",
+        "net.fabricmc", "maven.modrinth", "ca.weblite", "at.yawk.lz4"
+    )
+    into("agent-libs") {
+        from(tasks.named<Jar>("lbClassesForVanilla").flatMap { it.archiveFile })
+        from(configurations.runtimeClasspath.get().filter { f ->
+            if (!f.name.endsWith(".jar")) return@filter false
+            val p = f.absolutePath
+            if (p.contains("loom-cache") || f.name.contains("minecraft-merged")) return@filter false
+            if (f.name.startsWith("fabric-loader") || f.name.startsWith("sponge-mixin")) return@filter false
+            // lwjgl-egl is the one lwjgl module bare-vanilla MC does NOT ship; LB's MCEF needs it for
+            // Linux hardware-accel detection (org.lwjgl.egl.EGL14). Keep it though org.lwjgl is dropped.
+            if (f.name.startsWith("lwjgl-egl")) return@filter true
+            val g = if (p.contains("files-2.1/")) p.substringAfter("files-2.1/").substringBefore("/") else ""
+            g !in dropGroups
+        })
+    }
+}
