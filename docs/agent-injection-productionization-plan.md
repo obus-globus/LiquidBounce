@@ -21,6 +21,16 @@ Evidence: `SPIKE-RESULTS.md` / `FABRIC-SPIKE-RESULTS.md` / `NEOFORGE-PROBE-RESUL
 screenshots + committed `run.sh` clean-room repros. (Markdown table above won't render in
 Discord — it's for the repo.)
 
+**Scope of "proven" (do not overread the table):** every green result was under a **Gradle-driven
+launch (`./gradlew runClient` + an init-script) on software GL**. There is **zero** evidence yet
+for a bare `java -javaagent …` or a real launcher profile, and MCEF was only ever seen under
+software GL (where it's unstable). And critically — **vanilla is NOT a `-javaagent` at all**: its
+`run.sh` launches `vspike.VanillaLauncher` as the **main class** (the transforming classloader that
+generates `@ModifyArgs` synthetics is mandatory and cannot be retrofitted by a premain into an
+already-started JVM). So vanilla ships as a **custom launcher / launch-profile with its own main
+class**, a fundamentally different artifact from the two loader agents. "Feasibility is retired"
+means the *mechanism*; **user-attachable distribution is not yet demonstrated for any target.**
+
 **So feasibility is retired.** The forward work is **NOT** re-deriving whether this is
 possible, nor three separate *build* targets — it is **productionizing three proven
 throwaway `run.sh` launchers into distributable, reproducible artifacts.**
@@ -161,15 +171,22 @@ Productionizing = turning those into artifacts a user can actually attach, repro
 
 ## Milestones (once greenlit — reordered by the adversarial review: risk-first, not build-first)
 
-- **P0 — namespace/refmap risk: RESOLVED (done, not a future milestone).** Runtime-tested: stock
-  production Fabric 26.2 runs on `official`/Mojmap names, no intermediary, no refmap (see the
-  namespace section + `agent-injection-mapping-test/`). 26.2 is Mojmap on all three loaders. The
-  remaining P0-equivalent risk is now purely the **Gradle-umbilical / `-Dlb.*` self-containment**
-  (P1 below) + proving against a **real launcher profile** — a packaging test, not a feasibility one.
-- **P1 — self-contained agent jar** (§D/§3): read LB's classes/resources/AT/refmap as **jar
-  entries**, not `-Dlb.*` filesystem paths (`NFAgent` `FileReader(System.getProperty("lb.at"))`
-  and `LBHook`'s `-Dlb.classes*` must become jar-relative reads). Prove all three with a bare
-  `java -javaagent:… Main`, zero Gradle.
+- **P0 — real-launcher / zero-Gradle kill-shot (gates everything; per review-2).** Boot the
+  **Fabric** agent (cleanest: 59 LOC, no fallback loader, no native-URL nesting) against a **real
+  Prism/MultiMC instance**, hand-writing `-javaagent:lbagent.jar` + `-Dlb.*` in the launcher's
+  per-instance JVM-args box, staging LB manually — **zero Gradle, no init-script** — and reach the
+  Fly proof. It tests the two claims everything downstream rests on: (1) a stock launcher accepts
+  the agent in its JVM args, and (2) the DEFER hook fires when the classpath is the launcher's real
+  module path, not `sp.configurations.runtimeClasspath`. A failure here is a failure of the whole
+  premise, not one back-end. (Namespace sub-risk is already RESOLVED — see the mapping section — so
+  this spike is purely about launcher attachment + the Gradle-umbilical.)
+- **P1 — self-contained agent jar (classloader-model change, per review-2).** `LbLoader` is a
+  `URLClassLoader` over **filesystem** URLs, which can't load a fat jar's **nested** jars →
+  **extract bundled deps to a temp dir at premain** (like MCEF does for `libcef`) and feed real
+  file URLs; also redirect the AT read that is **emitted as bytecode** into
+  `AccessTransformerService.<init>` (`new FileReader(getProperty("lb.at"))`). No more `-Dlb.*`
+  dev paths. Prove all three with a bare `java -javaagent:… ` (loader targets) / a launch-profile
+  (vanilla), zero Gradle.
 - **P2 — unified entry point + host detection** (§D): today there are three separate hardcoded
   `Premain-Class` agents; the "one agent, detect vanilla/Fabric/NeoForge, three back-ends" is
   **net-new and unbuilt** — detect by resource probe before touching loader classes, gate the
@@ -179,8 +196,11 @@ Productionizing = turning those into artifacts a user can actually attach, repro
   incomplete); own the intersection child-first or delegate it. Prove the **MCEF native `libcef`**
   load path once per loader on a real GPU (native libs have process-global identity — can't be
   loaded by two classloaders).
-- **P4 — `:vanilla` Gradle subproject + fat agent jar** (§A) — real but now *after* the risk is
-  retired; the vanilla target is production-safe on namespace, so it's the lowest-risk build-out.
+- **P4 — vanilla `:vanilla` subproject → custom LAUNCHER / launch-profile** (§A) — NOT a
+  `-javaagent` jar (its main class is `vspike.VanillaLauncher`; the transforming CL is mandatory).
+  Ship it as a launch-profile that sets its own main class + a `fail-loud` post-init assertion.
+  Production-safe on namespace, but the `@Local`/named-LVT fragility (`MixinLocalPlayer`) is a
+  standing risk vs any client jar whose LVT differs from the dev jar — pin/verify.
 - **P5 — CI (scoped honestly, §E):** build + boot-to-mixin-apply asserted via log markers
   (`registered LB mixin configs`, `loaded LB AccessTransformer`); **functional / MCEF / in-world
   verification goes on a GPU runner or a manual gate — it CANNOT run headless** (software-GL MCEF
@@ -226,3 +246,60 @@ fragility is a production risk against any client whose LVT differs from the dev
 
 **Bank point:** this plan is reviewed and grounded. No build until scorpion greenlights — and if he
 does, **P0 (real-launcher Fabric spike) first**, because it can invalidate everything downstream.
+
+## Second adversarial review outcome (verdict: SOUND-WITH-FIXES; mappings correctly off the table)
+
+Round-2 reviewer, armed with the settled mapping proof, attacked productionization only. Did not
+re-raise mappings. New/sharpened findings, all verified against the code and folded in above:
+
+1. **[HIGH] Vanilla is not a `-javaagent` — it's a custom main class.** `run.sh:130` launches
+   `vspike.VanillaLauncher`, not `net.minecraft…Main`; the transforming classloader is mandatory
+   and can't be retrofitted by a premain. → vanilla ships as a **launcher/launch-profile**, not a
+   droppable agent. Milestone label "`:vanilla` fat agent jar with `Premain-Class`" was wrong.
+2. **[HIGH] Real-launcher attachment is the true P0**, not mappings (which is resolved). The plan's
+   own bank-point said this; the milestone list contradicted it — now reordered. Prism/MultiMC do
+   expose per-instance JVM-args, so `-javaagent` is addable for the two loaders — but never tested
+   outside Gradle where the classpath is a real module path, not `runtimeClasspath`.
+3. **[HIGH] Self-containment is a classloader-model change, not a read-path swap.** `LbLoader`
+   extends `URLClassLoader` over **filesystem** URLs (`NFAgent.java:78-80,102` = `File.toURL()`).
+   A fat jar's **nested** jars can't be loaded by stock `URLClassLoader` (no jar-in-jar scheme in
+   the JDK). → P1 must **extract bundled deps to a temp dir at premain** (as MCEF already does for
+   `libcef`) and hand `URLClassLoader` real file URLs. Also the AT path is **baked into emitted
+   bytecode** — `AccessTransformerService.<init>` gets an injected `new FileReader(getProperty(
+   "lb.at"))` (`NFAgent.java:152`) — that emitted read must be redirected too, not just a Java field.
+4. **[MED-HIGH] `LbLoader.OWNED` can't be proven complete by "it boots."** It grew reactively
+   (kotlin→atomicfu→okhttp→okio→ahocorasick, each after a distinct `LinkageError`); a missing entry
+   only fails when that class crosses the loader boundary at runtime. → P3 must **mechanically
+   generate** the set: dump every class the loader's `TransformingClassLoader` can load ∩ LB's
+   shadow-jar class list; make OWNED data-driven from that, not a hand-typed prefix array. (DJL,
+   MCEF's own deps, guava/gson overlaps are unenumerated.)
+5. **[MED] MCEF on real GPU is UNTESTED for all three** (every result was software-GL where MCEF
+   SIGILLs). "Works on real hardware" is a prediction, not a finding — one real-GPU run per loader
+   is required before any MCEF stability claim, separate from the CI gap + unpublished
+   `mcef-neoforge`.
+6. **[MED] Version brittleness + silent degradation.** The hooks bytecode-rewrite named internals
+   (`FabricMixinBootstrap.init`, `MixinFacade.finishInitialization`, `AccessTransformerService.<init>`,
+   `AddClientReloadListenersEvent.<init>`, reflective `ModuleClassLoader.fallbackClassLoader`
+   `NFAgent.java:115`). Today a missed seam prints `…FAILED` to stdout and the game **boots without
+   LB** — silent degradation that looks like "LB just doesn't work." → add a **fail-loud post-init
+   assertion** (module registry non-empty / a known mixin applied) and **pin tested loader versions**;
+   refuse to attach on mismatch.
+7. **[LOW-MED / new] Drop self-attach; name the security/ToS reality.** `VirtualMachine.attach`
+   self-attach needs `-Djdk.attach.allowAttachSelf=true` (disabled since JDK 9) — itself a JVM arg,
+   so it's **no simpler than `-javaagent`**; remove it from the distribution options. And an agent
+   that injects MC + pulls a payload is structurally a cheat/RAT shape → **anticheat flagging +
+   ccbluex distribution ToS** are real and currently unaddressed (out of code scope, but "how a
+   user attaches" and "will it get flagged" are the same question).
+8. **[LOW / new] Strip leftover diagnostics from the shipped artifact.** `-Dfml.earlyWindowControl=
+   false` (`neoforge-agent-run.sh:53`, changes user-facing error handling) and the
+   `FatalErrorReporting.reportFatalError` stdout hook (`NFAgent.java hookFatal`) are software-GL
+   debug scaffolding currently *in the proven artifact* — must not ship.
+
+**Still-overclaimed (corrected in the scope note up top):** "works in-world on all three" holds only
+under a Gradle-driven launch on software GL — no bare-`-javaagent`/real-launcher/real-GPU result
+exists yet. Vanilla's `@Local`/named-LVT fragility (`MixinLocalPlayer`) is a standing production
+risk against any client jar whose LVT differs from the exact dev jar — now carried as a §A caveat,
+not just an aside.
+
+**Cheapest highest-value next step (both reviews agree):** the **P0 Fabric-on-real-Prism, zero-Gradle
+spike** — a few hours, no LB code, and it gates every downstream milestone.
