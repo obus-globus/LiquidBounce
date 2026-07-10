@@ -1,0 +1,15 @@
+171:[09:20:01] [Render thread/INFO] [LiquidBounce/]: Launching LiquidBounce v0.38.1 by CCBlueX
+311:	at lb-agent-loader/net.ccbluex.liquidbounce.features.module.modules.combat.killaura.features.KillAuraAutoBlock.<init>(KillAuraAutoBlock.kt:72) ~[main/:?] {}
+312:	at lb-agent-loader/net.ccbluex.liquidbounce.features.module.modules.combat.killaura.features.KillAuraAutoBlock.<clinit>(KillAuraAutoBlock.kt) ~[main/:?] {}
+313:	at lb-agent-loader/net.ccbluex.liquidbounce.features.module.modules.combat.ModuleSwordBlock.shouldHideOffhand(ModuleSwordBlock.kt:78) ~[main/:?] {}
+314:	at lb-agent-loader/net.ccbluex.liquidbounce.features.module.modules.combat.ModuleSwordBlock.shouldHideOffhand$default(ModuleSwordBlock.kt:74) ~[main/:?] {}
+315:	at lb-agent-loader/net.ccbluex.liquidbounce.features.module.modules.combat.ModuleSwordBlock.shouldHideOffhand(ModuleSwordBlock.kt) ~[main/:?] {}
+330:Caused by: java.lang.NullPointerException: Parameter specified as non-null is null: method net.ccbluex.liquidbounce.config.types.group.ValueGroup.tree, parameter valueGroup
+331:	at lb-agent-loader/net.ccbluex.liquidbounce.config.types.group.ValueGroup.tree(ValueGroup.kt) ~[main/:?] {}
+332:	at lb-agent-loader/net.ccbluex.liquidbounce.features.module.modules.combat.killaura.ModuleKillAura.<clinit>(ModuleKillAura.kt:591) ~[main/:?] {}
+384:Caused by: java.lang.ExceptionInInitializerError: Exception java.lang.NullPointerException: Parameter specified as non-null is null: method net.ccbluex.liquidbounce.config.types.group.ValueGroup.tree, parameter valueGroup [in thread "Render thread"]
+385:	at lb-agent-loader//net.ccbluex.liquidbounce.config.types.group.ValueGroup.tree(ValueGroup.kt)
+386:	at lb-agent-loader//net.ccbluex.liquidbounce.features.module.modules.combat.killaura.ModuleKillAura.<clinit>(ModuleKillAura.kt:591)
+387:	at lb-agent-loader//net.ccbluex.liquidbounce.features.module.modules.combat.killaura.features.KillAuraAutoBlock.<init>(KillAuraAutoBlock.kt:72)
+388:	at lb-agent-loader//net.ccbluex.liquidbounce.features.module.modules.combat.killaura.features.KillAuraAutoBlock.<clinit>(KillAuraAutoBlock.kt)
+389:	at lb-agent-loader//net.ccbluex.liquidbounce.features.module.modules.combat.ModuleSwordBlock.shouldHideOffhand(ModuleSwordBlock.kt:78)

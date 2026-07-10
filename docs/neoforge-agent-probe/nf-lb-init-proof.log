@@ -1,0 +1,10 @@
+65:[NFAGENT] hooked MixinFacade.finishInitialization (14486 -> 14936)
+70:[NFAGENT] hooked AccessTransformerService.<init> (2849 -> 3300)
+82:[NFAGENT] registered LB mixin configs into live FMLMixinService
+83:[NFAGENT] installed LB child-first fallback (chained to original=net.neoforged.fml.classloading.ResourceMaskingClassLoader)
+154:[09:16:18] [Render thread/INFO] [minecraft/Minecraft]: Setting user: Dev
+162:[09:16:19] [Render thread/INFO] [LiquidBounce/]: Launching LiquidBounce v0.38.1 by CCBlueX
+163:[09:16:19] [Render thread/INFO] [LiquidBounce/]: Client Version: 0.38.1 (git-f739a3d)
+183:[09:16:19] [Render thread/INFO] [minecraft/ReloadableResourceManager]: Reloading ResourceManager: vanilla, mod_resources, mod/sodium, mod/lithium, mod/mcef, mod/immediatelyfast, mod/neoforge
+196:[09:16:21] [Render thread/INFO] [LiquidBounce/]: Loaded 36 Render Pipelines.
+224:[09:16:21] [Render thread/INFO] [minecraft/SoundEngine]: Sound engine started

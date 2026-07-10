@@ -128,6 +128,61 @@ mirrors the Fabric interposer):
 - MixinExtras is already present at runtime (0.5.4); dev namespace is mojmap so no refmap is needed in
   dev (a production install would ship LB's refmap).
 
+---
+
+## Full build-out — LB-on-NeoForge via the agent
+
+Built the full interposer (`lb-agent/src/nfagent/{NFAgent,LbLoader}.java`) + clean-room script
+(`neoforge-agent-run.sh`). Three FML-11 seams, all verified by javap and working:
+1. **Fallback loader** — `LbLoader` (child-first URLClassLoader over LB's build dirs + kotlin/
+   atomicfu/kotlinx deps, parent = TCL, chained to FML's original `ResourceMaskingClassLoader`
+   fallback) installed via `ModuleClassLoader.setFallbackClassLoader`. The NeoForge analogue of
+   Fabric `addToClassPath(Knot)`: LB classes/resources resolve *and* see `net.minecraft.*`.
+   Needed reentrancy guards on `loadClass`/`getResource`/`getResources` to break the
+   TCL⇄fallback delegation loop (a missing `getResources` guard caused a `StackOverflowError`).
+2. **AccessTransformer** — hook `AccessTransformerService.<init>` → `engine.loadAT(LB's AT,
+   "liquidbounce")` so NeoForge applies LB's 166-line AT natively (Mixin metadata sees widened
+   members — no LVTGenerator/IllegalAccess errors).
+3. **Mixin configs** — hook `MixinFacade.finishInitialization` → register `liquidbounce.mixins.json`
+   + `liquidbounce-neoforge.mixins.json` into the live FMLMixinService (the proven DEFER path).
+
+### (b) LB initializes on NeoForge via the agent — **GREEN**
+`nf-lb-init-proof.log` / `nf-lb-menu.png`. LB deregistered as a mod (mod list =
+sodium/lithium/mcef/immediatelyfast/neoforge — **no liquidbounce**). LB's mixins apply
+(e.g. `MixinBuiltInRegistries` into `net.minecraft.core.registries.BuiltInRegistries`),
+`Launching LiquidBounce v0.38.1 by CCBlueX`, 36 Render Pipelines loaded, boots to the menu,
+window branded `LiquidBounce v0.38.1 (dev)`. Clean, no fatal mixin/AT/classloader errors.
+
+### (c) module functional in-world — **BLOCKED (agent-specific), not yet achieved**
+Entering a world with LB-via-agent crashes:
+```
+NullPointerException: ValueGroup.tree, parameter valueGroup is null
+  ModuleKillAura.<clinit>(ModuleKillAura.kt:591)         <- tree(KillAuraAutoBlock) where the object is still null
+  KillAuraAutoBlock.<clinit>  (object : ToggleableValueGroup(ModuleKillAura, ...))
+  ModuleSwordBlock.shouldHideOffhand(ModuleSwordBlock.kt:78)   <- first touch, during render/tick
+```
+A circular Kotlin-`object` init: if `KillAuraAutoBlock` initializes before `ModuleKillAura`,
+`ModuleKillAura.<clinit>` reads the half-constructed `KillAuraAutoBlock` as null → NPE.
+
+**Positive control (the key test): LB as a NORMAL MOD enters the same worlds cleanly** —
+`nf-baseline-inworld-proof.log` (1688 advancements, no NPE), and it shows LB's **MCEF main
+menu** (`nf-baseline-mcef-menu.png`) whereas the agent run shows the **vanilla** title screen.
+So the crash + the missing custom menu are **agent-specific**, not LB or MC bugs.
+
+**Diagnosis** — LB-on-NeoForge is not yet *fully* equivalent via the agent:
+- LB's `@Mod` class `LiquidBounceNeoForge` registers on the **mod event bus**
+  (`AddClientReloadListenersEvent`); with no ModFile there is no mod bus, so that init is
+  skipped. LB's async (coroutine) module registration then races the first render tick, so
+  `ModuleKillAura` isn't fully class-initialized before `ModuleSwordBlock` touches
+  `KillAuraAutoBlock` → the circular-init NPE. The vanilla-vs-MCEF menu is the same class of gap.
+- Fabric didn't hit this because LB's Fabric init is purely mixin/entrypoint-driven with no
+  equivalent mod-bus dependency.
+
+**Remaining work for (c) parity** (identified, not trivial): replicate the `@Mod` mod-event-bus
+registration from the agent (or eagerly force-initialize LB's module objects after startup to fix
+the init-order race), and get MCEF's custom menu to render via the agent. This is LB-integration
+completeness work on top of the (now-proven) load mechanism.
+
 ## Reproduce Tier 2
 ```
 docs/neoforge-agent-probe/
