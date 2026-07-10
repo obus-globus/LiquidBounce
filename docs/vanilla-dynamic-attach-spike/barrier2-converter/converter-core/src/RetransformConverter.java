@@ -43,8 +43,13 @@ public class RetransformConverter {
         return new RetransformConverter(targetInternal).run(original, transformed);
     }
 
+    final Map<String,Integer> oFieldAcc = new HashMap<>();     // original field name -> access (for B: non-public => reflect)
+    final Map<String,String> oFieldDesc = new HashMap<>();
+    final LinkedHashSet<String> reflectFields = new LinkedHashSet<>();  // "name desc" of non-public target fields accessed
+
     Result run(byte[] original, byte[] transformed) {
         ClassNode O = read(original), X = read(transformed);
+        for (FieldNode f : O.fields) { oFieldAcc.put(f.name, f.access); oFieldDesc.put(f.name, f.desc); }
         Result r = new Result(); r.sidecarName = sidecar;
 
         Set<String> oF = keysF(O), oM = keysM(O); Set<String> oI = new HashSet<>(O.interfaces);
@@ -86,6 +91,10 @@ public class RetransformConverter {
         X.fields.removeIf(f -> addedFieldKeys.contains(f.name + " " + f.desc));
         X.methods.removeIf(m -> addedMethodKeys.contains(m.name + " " + m.desc));
         for (MethodNode m : X.methods) rewriteRefs(m, false);
+        // B: generate reflective accessors in the sidecar for every non-public target field we rewrote
+        for (String key : reflectFields) { String nm = key.substring(0, key.indexOf(' ')), dc = key.substring(key.indexOf(' ') + 1); addReflectiveAccessors(S, nm, dc); }
+        if (!reflectFields.isEmpty()) addReflectInit(S);
+        r.notes.add("reflective (non-public @Shadow) fields: " + reflectFields);
 
         r.target = write(X, original);
         // emit sidecar + state as one combined verify pass isn't needed; caller defines both
@@ -180,27 +189,103 @@ public class RetransformConverter {
     }
     final Map<String,String> relocatedHandlerName = new HashMap<>();
 
-    /** Rewrite references to added members: field->accessor, added-method-invoke->sidecar static. */
+    /** Rewrite references to added members (field->accessor, method->sidecar static, invokedynamic Handle->
+     *  sidecar static [A]) and, inside the sidecar, non-public target field access via reflection [B]. */
     void rewriteRefs(MethodNode m, boolean inSidecar) {
         if (m.instructions == null) return;
         for (AbstractInsnNode p = m.instructions.getFirst(), next; p != null; p = next) {
             next = p.getNext();   // capture BEFORE any set() detaches p (else iteration stops after one rewrite)
             if (p instanceof FieldInsnNode fi && fi.owner.equals(targetInternal)) {
                 if (addedInstanceFields.contains(fi.name)) {
-                    Type t = Type.getType(fi.desc);
                     if (fi.getOpcode() == Opcodes.GETFIELD)
                         m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, accGet(fi.name), "(" + targetDesc + ")" + fi.desc, false));
                     else if (fi.getOpcode() == Opcodes.PUTFIELD)
                         m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, accSet(fi.name), "(" + targetDesc + fi.desc + ")V", false));
                 } else if (addedStaticFields.contains(fi.name)) {
                     m.instructions.set(p, new FieldInsnNode(fi.getOpcode(), sidecar, fi.name, fi.desc));
+                } else if (inSidecar && oFieldAcc.containsKey(fi.name) && (oFieldAcc.get(fi.name) & Opcodes.ACC_PUBLIC) == 0
+                        && (fi.getOpcode() == Opcodes.GETFIELD || fi.getOpcode() == Opcodes.PUTFIELD)) {
+                    // B: non-public target field accessed from the sidecar -> reflective accessor (no AW on target)
+                    reflectFields.add(fi.name + " " + fi.desc);
+                    if (fi.getOpcode() == Opcodes.GETFIELD)
+                        m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "refGet$" + fi.name, "(" + targetDesc + ")" + fi.desc, false));
+                    else
+                        m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "refSet$" + fi.name, "(" + targetDesc + fi.desc + ")V", false));
                 }
             } else if (p instanceof MethodInsnNode mi && mi.owner.equals(targetInternal) && addedMethodKeys.contains(mi.name + " " + mi.desc)) {
                 boolean wasStatic = mi.getOpcode() == Opcodes.INVOKESTATIC;
                 String nd = wasStatic ? mi.desc : "(" + targetDesc + mi.desc.substring(1);
                 m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "h$" + mi.name, nd, false));
+            } else if (p instanceof InvokeDynamicInsnNode idn) {
+                // A: rewrite bootstrap Handle args that point at a relocated target method -> sidecar static.
+                // The lambda's captured `this` (target) becomes the static's param0 (LambdaMetafactory adapts
+                // a captured arg to a leading static parameter identically to an instance receiver).
+                for (int k = 0; k < idn.bsmArgs.length; k++) {
+                    if (idn.bsmArgs[k] instanceof Handle h && h.getOwner().equals(targetInternal)
+                            && addedMethodKeys.contains(h.getName() + " " + h.getDesc())) {
+                        boolean wasStatic = h.getTag() == Opcodes.H_INVOKESTATIC;
+                        String nd = wasStatic ? h.getDesc() : "(" + targetDesc + h.getDesc().substring(1);
+                        idn.bsmArgs[k] = new Handle(Opcodes.H_INVOKESTATIC, sidecar, "h$" + h.getName(), nd, false);
+                    }
+                }
             }
         }
+    }
+
+    /** B: reflective get/set of a non-public target field (Field cached in a sidecar static, setAccessible). */
+    void addReflectiveAccessors(ClassNode S, String name, String desc) {
+        S.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "F$" + name, "Ljava/lang/reflect/Field;", null, null));
+        Type t = Type.getType(desc);
+        boolean prim = t.getSort() >= Type.BOOLEAN && t.getSort() <= Type.DOUBLE;
+        String box = prim ? boxOwner(t) : null;
+        // get
+        MethodNode g = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "refGet$" + name, "(" + targetDesc + ")" + desc, null, null);
+        InsnList gi = g.instructions;
+        gi.add(new FieldInsnNode(Opcodes.GETSTATIC, sidecar, "F$" + name, "Ljava/lang/reflect/Field;"));
+        gi.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        if (prim) { gi.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/reflect/Field", primGetter(t), "(Ljava/lang/Object;)" + t.getDescriptor(), false)); gi.add(new InsnNode(t.getOpcode(Opcodes.IRETURN))); }
+        else { gi.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/reflect/Field", "get", "(Ljava/lang/Object;)Ljava/lang/Object;", false)); gi.add(new TypeInsnNode(Opcodes.CHECKCAST, t.getInternalName())); gi.add(new InsnNode(Opcodes.ARETURN)); }
+        wrapTryCatch(g); g.maxStack = 3; g.maxLocals = 3; S.methods.add(g);
+        // set
+        MethodNode s = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "refSet$" + name, "(" + targetDesc + desc + ")V", null, null);
+        InsnList si = s.instructions;
+        si.add(new FieldInsnNode(Opcodes.GETSTATIC, sidecar, "F$" + name, "Ljava/lang/reflect/Field;"));
+        si.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        si.add(new VarInsnNode(t.getOpcode(Opcodes.ILOAD), 1));
+        if (prim) si.add(new MethodInsnNode(Opcodes.INVOKESTATIC, box, "valueOf", "(" + t.getDescriptor() + ")L" + box + ";", false));
+        si.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/reflect/Field", "set", "(Ljava/lang/Object;Ljava/lang/Object;)V", false));
+        si.add(new InsnNode(Opcodes.RETURN));
+        wrapTryCatch(s); s.maxStack = 3; s.maxLocals = 1 + t.getSize(); S.methods.add(s);
+    }
+    static String primGetter(Type t) { switch (t.getSort()) { case Type.BOOLEAN: return "getBoolean"; case Type.BYTE: return "getByte"; case Type.CHAR: return "getChar"; case Type.SHORT: return "getShort"; case Type.INT: return "getInt"; case Type.LONG: return "getLong"; case Type.FLOAT: return "getFloat"; default: return "getDouble"; } }
+    static String boxOwner(Type t) { switch (t.getSort()) { case Type.BOOLEAN: return "java/lang/Boolean"; case Type.BYTE: return "java/lang/Byte"; case Type.CHAR: return "java/lang/Character"; case Type.SHORT: return "java/lang/Short"; case Type.INT: return "java/lang/Integer"; case Type.LONG: return "java/lang/Long"; case Type.FLOAT: return "java/lang/Float"; default: return "java/lang/Double"; } }
+    void wrapTryCatch(MethodNode m) {
+        LabelNode s = new LabelNode(), e = new LabelNode(), h = new LabelNode();
+        m.instructions.insertBefore(m.instructions.getFirst(), s);
+        m.instructions.add(e);
+        m.instructions.add(h);
+        m.instructions.add(new TypeInsnNode(Opcodes.NEW, "java/lang/RuntimeException"));
+        m.instructions.add(new InsnNode(Opcodes.DUP_X1)); m.instructions.add(new InsnNode(Opcodes.SWAP));
+        m.instructions.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/RuntimeException", "<init>", "(Ljava/lang/Throwable;)V", false));
+        m.instructions.add(new InsnNode(Opcodes.ATHROW));
+        m.tryCatchBlocks.add(new TryCatchBlockNode(s, e, h, "java/lang/Throwable"));
+    }
+    /** append FIELD lookups to the sidecar <clinit>. */
+    void addReflectInit(ClassNode S) {
+        MethodNode clinit = null; for (MethodNode m : S.methods) if (m.name.equals("<clinit>")) { clinit = m; break; }
+        AbstractInsnNode ret = clinit.instructions.getLast(); while (ret != null && ret.getOpcode() != Opcodes.RETURN) ret = ret.getPrevious();
+        InsnList add = new InsnList();
+        for (String key : reflectFields) {
+            String nm = key.substring(0, key.indexOf(' '));
+            add.add(new LdcInsnNode(Type.getObjectType(targetInternal)));
+            add.add(new LdcInsnNode(nm));
+            add.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/Class", "getDeclaredField", "(Ljava/lang/String;)Ljava/lang/reflect/Field;", false));
+            add.add(new InsnNode(Opcodes.DUP));
+            add.add(new InsnNode(Opcodes.ICONST_1));
+            add.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/reflect/Field", "setAccessible", "(Z)V", false));
+            add.add(new FieldInsnNode(Opcodes.PUTSTATIC, sidecar, "F$" + nm, "Ljava/lang/reflect/Field;"));
+        }
+        clinit.instructions.insertBefore(ret, add); clinit.maxStack = Math.max(clinit.maxStack, 3);
     }
 
     // ---- io ----

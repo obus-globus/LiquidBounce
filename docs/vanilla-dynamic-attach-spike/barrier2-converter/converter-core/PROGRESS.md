@@ -36,3 +36,35 @@ sidecar (no schema change on the target). Mechanical but a distinct code path fr
 
 ## Manual residue (the original hard-stop, unchanged): 5 hard `@Local` sites (esp.
 ## MixinPlayerTabOverlay `LocalIntRef` write-back), the `ItemCooldownsAddition.Entry` type-move.
+
+## UPDATE — A and B built + verified live (all four categories, one retransform onto already-loaded Minecraft)
+
+`[CONVAUTO][LIVE]` (single live run, MC stays alive, retransform SUCCESS, 0 NoSuchMethod/Field/Verify/crash):
+- handler+field: convTickCount 100/200/300/400 (external State works)
+- @Local(argsOnly): captured param=1.0 passed to relocated handler
+- **A @WrapOperation: handler fired — invokedynamic bridge Handle rewired to the sidecar static, no NoSuchMethodError**
+- **B @Shadow-of-private (window): read OK via the reflective sidecar accessor (no AW, no schema change)**
+
+A = `RetransformConverter.rewriteRefs` now rewrites `InvokeDynamicInsnNode` bootstrap `Handle`s that point
+at a relocated target method -> `H_INVOKESTATIC` on the sidecar with the target prepended as param0
+(LambdaMetafactory adapts the captured `this` to a leading static param identically to an instance receiver).
+B = non-public target field access from the sidecar is rewritten to a reflective accessor (`Field.setAccessible`,
+cached static, primitive get/set via `Field.getInt`/`setInt` etc.) instead of an AccessWidener flip (which
+retransform rejects).
+
+## Mechanical categories now handled by the converter (verified live unless noted):
+@Inject handler, instance @Unique field, static @Unique (offline), @WrapOperation/@Wrap* (invokedynamic),
+@Shadow-of-private (reflection), @Local(argsOnly + clean early-in-scope locals — same relocation path), interface-drop.
+
+## @Local disposition
+CLEAN (convert): the 23 argsOnly (params) + ~13 single early/in-scope locals — the relocated handler receives
+the captured value as an argument passed by the body-edit (same path proven for argsOnly). Verified live for argsOnly.
+LEAVE TO ON-LOAD PATH (default, small live-attach coverage loss — named):
+- MixinPlayerTabOverlay.hookTabColumnHeight — @Local LocalIntRef rows/cols WRITE-BACK (mutates the target frame;
+  a pass-by-value external static cannot express it).
+- MixinFireworkRocketEntity.hookExtendedFirework — @Local(ordinal) Vec3 lookAngle/movement (transient intermediates).
+- MixinPlayerTabOverlay.hookRenderPlayerBackground — @Local int i loop-induction counter.
+- MixinScreenRectangle recycle injects — @Local Vector2f pooled corner vectors (debug-name dependent).
+- MixinChatComponent.hookAddVisibleMessage — @Local List lines (interior computed list).
+These ~5 mixins retain the on-load agent (premain/attach-early), which has no @Local restriction; only their
+retro-apply-to-already-loaded coverage is deferred.
