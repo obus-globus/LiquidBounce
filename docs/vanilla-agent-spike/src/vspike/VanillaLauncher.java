@@ -23,6 +23,9 @@ public class VanillaLauncher {
 
         final AccessWidener aw = loadAw(System.getProperty("vspike.accessWidener", "liquidbounce.accesswidener"));
         if (aw != null) System.out.println("[VSPIKE] AccessWidener: " + aw.directives + " directives");
+        // Mixin's ClassInfo metadata must see the same AW-widened classes the transformer produces,
+        // or injectors targeting a widened private method fail with LVTGeneratorError.
+        VSpikeBytecodeProvider.AW = aw;
 
         MixinBootstrap.init();
         for (String c : System.getProperty("vspike.configs", "").split(",")) { c = c.trim(); if (!c.isEmpty()) { Mixins.addConfiguration(c); System.out.println("[VSPIKE] +config " + c); } }
