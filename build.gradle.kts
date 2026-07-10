@@ -575,7 +575,7 @@ tasks.register<Jar>("vanillaPureAgentJar") {
     val spongeJar = configurations.runtimeClasspath.get().files.filter { it.name.startsWith("sponge-mixin") }
     val asmVer = asmJars.first { it.name.matches(Regex("asm-\\d.*\\.jar")) }.name.removePrefix("asm-").removeSuffix(".jar")
     manifest {
-        attributes("Premain-Class" to "vspike.PureVanillaAgent",
+        attributes("Premain-Class" to "vspike.PureVanillaAgent", "Agent-Class" to "vspike.PureVanillaAgent",
                    "Can-Retransform-Classes" to "true", "Can-Redefine-Classes" to "true")
         attributes(mapOf("Implementation-Title" to "ASM", "Implementation-Version" to asmVer), "org/objectweb/asm/")
     }
@@ -613,4 +613,18 @@ tasks.register<Jar>("vanillaPureAgentJar") {
         from(nd) { into("mcef-native") }
         logger.lifecycle("bundleMcefNative ON: bundling MCEF native from $nd")
     }
+}
+
+// ===== No-flag injector ("watcher") — pairs with :vanillaPureAgentJar =====
+// A tiny standalone jar the user runs first; it detects a vanilla MC JVM and attaches the pure LB agent in
+// the early SIGQUIT window (before GLFW drops the signal), so LB injects into stock MC started with NO flags.
+sourceSets { create("watcher") { java.srcDir("docs/vanilla-agent-selfcontained/watcher/src") } }
+tasks.register<Jar>("vanillaWatcherJar") {
+    group = "liquidbounce"
+    description = "No-flag injector: detect a vanilla MC JVM + attach the pure LB agent in the early window."
+    dependsOn("watcherClasses")
+    archiveFileName.set("liquidbounce-watcher.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("agent-vanilla"))
+    manifest { attributes("Main-Class" to "LiquidBounceWatcher") }
+    from(sourceSets["watcher"].output)
 }

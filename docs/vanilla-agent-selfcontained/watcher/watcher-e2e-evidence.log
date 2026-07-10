@@ -1,0 +1,29 @@
+# No-flag watcher — end-to-end evidence (2026-07-10)
+
+## Reliability (warm watcher hits the early SIGQUIT window):
+  run: attach-time  LB-inited
+  1: +1075ms  yes
+  2: +1085ms  yes
+  3: +1014ms  yes
+  4: +1213ms  yes
+  (+988ms, +1096ms in prior runs) -> 6/6 window hits on this VM
+
+## One full e2e (no -javaagent, no --add-opens, no launcher on MC):
+[PUREVANILLA] pure agent premain/agentmain (stock Main, no launcher main class)
+[PUREVANILLA] opened java.base/java.lang via Instrumentation (no --add-opens needed)
+[PUREVANILLA] appended 138 bundled LB jars to the system classloader
+[15:21:19] [Render thread/INFO]: Launching LiquidBounce v0.38.1 by CCBlueX
+[15:21:21] [Render thread/INFO]: Loaded 39 Render Pipelines.
+[15:21:24] [Render thread/INFO]: Successfully initialized browser.
+[15:21:25] [Render thread/INFO]: Integration Browser CefBrowser(hash='1796885026', id='1', url='http://127.0.0.1:33139/resource/liquidbounce/?lb_code=xHFirRMQS0ZURjLP#/', visible=true, priority=10) is ready.
+[WATCHER] ATTACHED pid=428203 at +1096ms (attempt 0) — LB agent armed
+[WATCHER] ATTACHED pid=428942 at +1082ms (attempt 0) — LB agent armed
+[WATCHER] ATTACHED pid=429188 at +1070ms (attempt 0) — LB agent armed
+[WATCHER] ATTACHED pid=429429 at +1009ms (attempt 0) — LB agent armed
+[WATCHER] ATTACHED pid=429670 at +1190ms (attempt 0) — LB agent armed
+[WATCHER] ATTACHED pid=430432 at +4313ms (attempt 0) — LB agent armed
+
+## Coverage gap: LB mixin targets loaded BEFORE the ~1.1s attach lands (missed by the watcher):
+  3 of 151 targets -> mixins MixinStyleAccessor / MixinMutableComponent / MixinTranslatableContents
+  (net.minecraft.network.chat.{Style,MutableComponent,contents.TranslatableContents}, loaded ~655-756ms in Bootstrap)
+  the other 148 targets load after 2s and are caught; LB fully inits + MCEF renders regardless.

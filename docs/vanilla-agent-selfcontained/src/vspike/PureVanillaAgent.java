@@ -49,9 +49,24 @@ public class PureVanillaAgent {
     static final Map<String, ProtectionDomain> pdCache = new ConcurrentHashMap<>();
     static final ProtectionDomain NULL_PD = new ProtectionDomain(null, null);
 
+    /** Dynamic-attach entrypoint (watcher injector): arm the exact same pipeline as premain. Classes already
+     *  loaded before the attach lands are not caught (the early-boot coverage gap — see the watcher docs). */
+    public static void agentmain(String args, Instrumentation inst) throws Exception { premain(args, inst); }
+
+    static final java.util.concurrent.atomic.AtomicBoolean ARMED = new java.util.concurrent.atomic.AtomicBoolean(false);
+
     public static void premain(String args, Instrumentation inst) throws Exception {
+        if (!ARMED.compareAndSet(false, true)) { System.out.println("[PUREVANILLA] already armed; ignoring re-entry"); return; }
         INST = inst;
-        System.out.println("[PUREVANILLA] pure -javaagent premain (stock Main, no launcher main class)");
+        System.out.println("[PUREVANILLA] pure agent premain/agentmain (stock Main, no launcher main class)");
+        // Open java.base/java.lang to us via Instrumentation so reflective ClassLoader.defineClass (synthetic
+        // injection) + ProcessEnvironment (offline-MCEF env) work WITHOUT any launch --add-opens flag. This is
+        // what makes the no-flag dynamic-attach model viable (attached MC has no JVM flags at all).
+        try {
+            inst.redefineModule(Object.class.getModule(), java.util.Set.of(), java.util.Map.of(), java.util.Map.of(
+                "java.lang", java.util.Set.of(PureVanillaAgent.class.getModule())), java.util.Set.of(), java.util.Map.of());
+            System.out.println("[PUREVANILLA] opened java.base/java.lang via Instrumentation (no --add-opens needed)");
+        } catch (Throwable t) { System.out.println("[PUREVANILLA] redefineModule failed (falling back to --add-opens if present): " + t); }
         System.setProperty("mixin.bootstrapService", "vspike.VSpikeServiceBootstrap");
         System.setProperty("mixin.service", "vspike.VSpikeService");
 
@@ -114,6 +129,11 @@ public class PureVanillaAgent {
     static final class CFT implements ClassFileTransformer {
         public byte[] transform(ClassLoader loader, String className, Class<?> cbr, ProtectionDomain pd, byte[] buf) {
             if (className == null) return null;
+            // Only ever touch game namespaces. Critically, NEVER JDK/system classes: when attached very early
+            // (during the signed MC jar's verification) a transform call on e.g. sun.security.* re-enters class
+            // loading and throws ClassCircularityError, killing MC. AW + all LB mixin targets are net.minecraft/
+            // com.mojang; LB's own classes need no transform.
+            if (!(className.startsWith("net/minecraft/") || className.startsWith("com/mojang/"))) return null;
             try {
                 byte[] cur = buf; boolean changed = false;
                 if (aw != null) { byte[] w = aw.apply(className, cur); if (w != null) { cur = w; changed = true; } }
