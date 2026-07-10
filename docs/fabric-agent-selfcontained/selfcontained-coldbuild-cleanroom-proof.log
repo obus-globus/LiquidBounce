@@ -1,0 +1,7 @@
+56:[SCAGENT] staged LB + 73 bundled deps onto Knot=net.fabricmc.loader.impl.launch.knot.KnotClassLoader@dc24521
+57:[SCAGENT] applied liquidbounce.accesswidener via ClassTweaker (13747 bytes)
+58:[SCAGENT] added liquidbounce.mixins.json + liquidbounce-fabric.mixins.json
+166:[12:33:17] [Render thread/INFO]: Launching LiquidBounce v0.38.1 by CCBlueX
+167:[12:33:17] [Render thread/INFO]: Client Version: 0.38.1 (git-5dc105c)
+188:[12:33:19] [Render thread/INFO]: Loaded 36 Render Pipelines.
+216:[12:33:19] [Render thread/INFO]: Sound engine started
