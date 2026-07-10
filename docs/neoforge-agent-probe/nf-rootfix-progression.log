@@ -1,0 +1,8 @@
+89:[NFAGENT] forced NeoForgePlatform.registerResourceReloadListeners=false (LB runs its no-mod-bus init fallback)
+104:[09:43:13] [Render thread/INFO] [minecraft/Minecraft]: Setting user: Dev
+111:[09:43:14] [Render thread/INFO] [LiquidBounce/]: Launching LiquidBounce v0.38.1 by CCBlueX
+118:[09:43:14] [Render thread/WARN] [LiquidBounce/]: Failed to register resource reloader!
+210:[09:43:16] [Render thread/INFO] [minecraft/SoundEngine]: Sound engine started
+240:java.lang.IllegalStateException: Missing uniform Globals (should be UNIFORM_BUFFER)
+258:[09:43:16] [DefaultDispatcher-worker-7/INFO] [LiquidBounce/]: API initialization done.
+266:java.lang.IllegalStateException: Missing uniform Globals (should be UNIFORM_BUFFER)

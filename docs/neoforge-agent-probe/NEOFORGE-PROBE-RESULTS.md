@@ -183,6 +183,41 @@ registration from the agent (or eagerly force-initialize LB's module objects aft
 the init-order race), and get MCEF's custom menu to render via the agent. This is LB-integration
 completeness work on top of the (now-proven) load mechanism.
 
+### (c) attempt 2 — root fix landed, but in-world parity deepens into whack-a-mole
+
+Per the diagnosis, the root cause of both symptoms (circular-init crash + vanilla-instead-of-MCEF
+menu) is that LB's `@Mod` mod-event-bus init path is skipped with no ModFile. Root fix (not a
+band-aid): `NeoForgePlatform.registerResourceReloadListeners` returns `true` whenever the listener
+*ids* are known, without checking the mod-bus `AddClientReloadListenersEvent` actually registered
+the `LazyReloadListener` wrappers — so LB's own designed direct-reload fallback never runs. The
+agent now forces that method to `false`, so LB runs its intended fallback
+(`initializeClient()` → `ModuleManager.registerInbuilt()` on the render thread during
+`ClientStartEvent`, before any render frame + theme reload). `nf-rootfix-progression.log`.
+
+**This worked** — the circular `ModuleKillAura` init crash is gone; LB proceeds into full init
+(`Failed to register resource reloader!` → module registration → `API initialization done.`).
+
+But it exposed a chain of deeper agent-specific integration gaps, each fix revealing the next:
+1. `NoClassDefFoundError: kotlinx/atomicfu/AtomicFU` — fixed (include all LB runtime jars in the
+   fallback loader, not just `kotlin*`).
+2. `LinkageError: loader constraint violation` on `kotlin.coroutines.Continuation` — LB's kotlin
+   (on the agent loader) vs `okhttp3.coroutines` (resolved on the parent loader) disagreed. Fixed
+   by making `okhttp3`/`okio` child-first on the agent loader.
+3. `IllegalStateException: Missing uniform Globals (should be UNIFORM_BUFFER)` — a **rendering**
+   crash in `com.mojang.blaze3d.opengl.GlCommandEncoder` (LB's 36 render pipelines + sodium/
+   immediatelyfast draw path). Not classloader/init.
+
+**Positive control:** LB as a normal mod renders in-world and reaches its MCEF menu, so these are
+agent-specific — they stem from LB's NeoForge distribution assuming it is a real ModFile (single
+game-layer module classloader; mod event bus). Splitting LB onto a child-first fallback loader
+keeps surfacing new class-identity / integration seams.
+
+**STATUS: (c) not achieved.** The load mechanism is proven on all three loaders and (b) init is
+green on NeoForge, but full in-world parity via the agent is a whack-a-mole of NeoForge-integration
+gaps rather than a single fix. Per the stop-and-surface guard, this is a judgment call on whether
+NeoForge in-world parity is worth the depth — vanilla and Fabric already give a working
+agent-injection path, and NeoForge's mechanism (kill-shots + init) is proven.
+
 ## Reproduce Tier 2
 ```
 docs/neoforge-agent-probe/

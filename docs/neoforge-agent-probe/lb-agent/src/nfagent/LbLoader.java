@@ -17,7 +17,12 @@ import java.net.URLClassLoader;
  */
 public final class LbLoader extends URLClassLoader {
 
-    private static final String[] OWNED = { "net/ccbluex/", "kotlin/", "kotlinx/" };
+    // LB-exclusive packages (not provided by the NeoForge/MC platform) — defined child-first so
+    // LB's whole dependency graph shares ONE kotlin runtime (else okhttp-coroutines on the parent
+    // loader and LB's kotlin on this loader disagree on kotlin.coroutines.Continuation -> LinkageError).
+    private static final String[] OWNED = {
+        "net/ccbluex/", "kotlin/", "kotlinx/", "okhttp3/", "okio/", "org/ahocorasick/",
+    };
 
     private final ClassLoader original;         // FML's pre-existing TCL fallback (may be null)
     private final ThreadLocal<java.util.Set<String>> loadingNames = ThreadLocal.withInitial(java.util.HashSet::new);
