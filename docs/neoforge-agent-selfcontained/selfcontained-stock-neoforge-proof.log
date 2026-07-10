@@ -1,0 +1,300 @@
+[NFAGENT] appended 10 root LB resources to system loader: [pipes-fork-server-default-log4j2.xml, git.properties, liquidbounce-neoforge.mixins.json, DebugProbesKt.bin, jcef.commit, icon.png, pytorch-engine.properties, LICENSE_Reflect, liquidbounce.mixins.json, LICENSE_mcef-neoforge]
+[NFAGENT] self-contained: staged 50 bundled libs, 940 owned packages (data-driven), AT=true
+2026-07-10T11:05:51.525206094Z main WARN Advanced terminal features are not available in this environment
+[13:05:51] [main/INFO] [ne.ne.fm.st.Entrypoint/]: JVM Uptime at startup: 508ms
+[13:05:51] [main/INFO] [ne.ne.fm.lo.FMLLoader/]: Starting FancyModLoader version 11.0.13 (CLIENT in DEV)
+[13:05:51] [main/INFO] [ne.ne.fm.lo.FMLLoader/]: Game directory: /home/clawd/obus/liquidbounce-and-stuff/liquidbounce neoforge/LiquidBounce/neoforge
+[13:05:51] [main/INFO] [ne.ne.fm.lo.EarlyServiceDiscovery/]: Found 3 early service jars (out of 106) in 15ms
+[13:05:51] [main/INFO] [ne.ne.fm.lo.FMLLoader/]: Loading FML Early Services:
+[13:05:51] [main/INFO] [ne.ne.fm.lo.FMLLoader/]:  - /home/clawd/.gradle/caches/modules-2/files-2.1/net.neoforged.fancymodloader/loader/11.0.13/c9c89eaf35535990110088224d188748d81eaecf/loader-11.0.13.jar
+[13:05:51] [main/INFO] [ne.ne.fm.lo.FMLLoader/]:  - /home/clawd/.gradle/caches/modules-2/files-2.1/net.neoforged.fancymodloader/earlydisplay/11.0.13/491a1bedecb33802fa118cae384b60f91f6f0241/earlydisplay-11.0.13.jar
+[13:05:51] [main/INFO] [ne.ne.fm.lo.FMLLoader/]:  - /home/clawd/.gradle/caches/modules-2/files-2.1/maven.modrinth/sodium/mc26.2-0.9.0-neoforge/87343ae58926df08a73138c681320d9c71bba429/sodium-mc26.2-0.9.0-neoforge.jar
+[13:05:51] [main/INFO] [ne.ne.fm.lo.ImmediateWindowHandler/]: Running graphics bootstrap plugin sodium
+[13:05:51] [main/INFO] [Sodium-GraphicsAdapterProbe/]: Searching for graphics cards...
+[13:05:51] [main/INFO] [Sodium-GraphicsAdapterProbe/]: Found graphics adapter: LinuxPciAdapterInfo[vendor=UNKNOWN, name=Device 1111, pciVendorId=0x1234, pciDeviceId=0x1111]
+[13:05:51] [main/WARN] [Sodium-Workarounds/]: Sodium has applied one or more workarounds to prevent crashes or other issues on your system: [NO_ERROR_CONTEXT_UNSUPPORTED]
+[13:05:51] [main/WARN] [Sodium-Workarounds/]: This is not necessarily an issue, but it may result in certain features or optimizations being disabled. You can sometimes fix these issues by upgrading your graphics driver.
+[13:05:51] [main/INFO] [ne.ne.fm.lo.ImmediateWindowHandler/]: Loading ImmediateWindowProvider fmlearlywindow
+[13:05:51] [fml-loadingscreen/INFO] [ne.ne.fm.ea.re.LoadingScreenRenderer/]: GL info: llvmpipe (LLVM 20.1.2, 256 bits) GL version 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2, Mesa
+[13:05:51] [ForkJoinPool.commonPool-worker-2/INFO] [ne.ne.fm.lo.mo.lo.GameLocator/]: Detected a joined NeoForge and Minecraft configuration. Applying filtering...
+[13:05:52] [ForkJoinPool.commonPool-worker-2/INFO] [ne.ne.fm.lo.mo.lo.JarInJarDependencyLocator/]: Found 4 dependencies adding them to mods collection
+[13:05:52] [ForkJoinPool.commonPool-worker-2/INFO] [ne.ne.fm.lo.mo.ModDiscoverer/]: 
+     Mod List:
+		Name Version (Mod Id)
+
+		ImmediatelyFast 1.16.0+26.2 (immediatelyfast)
+		Lithium 0.25.0 (lithium)
+		Minecraft 26.2 (minecraft)
+		NeoForge 26.2.0.7-beta (neoforge)
+		Sodium 0.9.0+mc26.2 (sodium)
+[NFAGENT] hooked MixinFacade.finishInitialization (14486 -> 14940)
+[13:05:52] [main/INFO] [mixin/]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/home/clawd/.gradle/caches/modules-2/files-2.1/net.fabricmc/sponge-mixin/0.17.3+mixin.0.8.7/41c4a3984a80f4679e759fb9f495587acc5cdac7/sponge-mixin-0.17.3+mixin.0.8.7.jar Service=FML Env=CLIENT
+[13:05:52] [main/INFO] [ne.ne.fm.lo.FMLLoader/]: Loading FML Plugins:
+[13:05:52] [main/INFO] [ne.ne.fm.lo.FMLLoader/]:  - /home/clawd/.gradle/caches/modules-2/files-2.1/maven.modrinth/ImmediatelyFast/1.16.0+26.2-neoforge/484951aa7faf2305b98086909f274b6babc198df/ImmediatelyFast-1.16.0+26.2-neoforge.jar > Reflect-1.6.2.jar
+[13:05:52] [main/INFO] [ne.ne.fm.lo.FMLLoader/]:  - /home/clawd/.gradle/caches/modules-2/files-2.1/net.neoforged/neoforge/26.2.0.7-beta/95b7c02cfc2457597fdf119a3e902f25a30f5cb4/neoforge-26.2.0.7-beta-universal.jar > net.neoforged.neoforge-coremods-26.2.0.7-beta.jar
+[NFAGENT] hooked AccessTransformerService.<init> (2849 -> 3257)
+[NFAGENT] loaded LB AccessTransformer into FML AT engine
+[13:05:52] [main/INFO] [ne.ne.fm.lo.FMLLoader/]: Building game content classloader:
+ - immediatelyfast (jar(/home/clawd/.gradle/caches/modules-2/files-2.1/maven.modrinth/ImmediatelyFast/1.16.0+26.2-neoforge/484951aa7faf2305b98086909f274b6babc198df/ImmediatelyFast-1.16.0+26.2-neoforge.jar))
+ - lithium (jar(/home/clawd/.gradle/caches/modules-2/files-2.1/maven.modrinth/lithium/mc26.2-0.25.0-neoforge/d80b5cc65d41dd1845537c2431e2e45258f529c1/lithium-mc26.2-0.25.0-neoforge.jar))
+ - minecraft (composite(filtered(jar(build/moddev/artifacts/minecraft-patched-26.2.0.7-beta.jar)), filtered(jar(build/moddev/artifacts/minecraft-patched-26.2.0.7-beta.jar))))
+ - mixinextras.neoforge (jar(/home/clawd/.gradle/caches/modules-2/files-2.1/net.neoforged/neoforge/26.2.0.7-beta/95b7c02cfc2457597fdf119a3e902f25a30f5cb4/neoforge-26.2.0.7-beta-universal.jar > mixinextras-neoforge-0.5.4.jar))
+ - neoforge (composite(filtered(jar(/home/clawd/.gradle/caches/modules-2/files-2.1/net.neoforged/neoforge/26.2.0.7-beta/95b7c02cfc2457597fdf119a3e902f25a30f5cb4/neoforge-26.2.0.7-beta-universal.jar))))
+ - net.neoforged.fml.generated (empty(VirtualJar/net.neoforged.fml.generated))
+ - sodium (jar(/home/clawd/.gradle/caches/modules-2/files-2.1/maven.modrinth/sodium/mc26.2-0.9.0-neoforge/87343ae58926df08a73138c681320d9c71bba429/sodium-mc26.2-0.9.0-neoforge.jar > net.caffeinemc.sodium-neoforge-0.9.0+mc26.2-mod.jar))
+[13:05:52] [main/INFO] [ne.ne.fm.lo.FMLLoader/]: Built game content classloader in 18ms
+[13:05:52] [main/INFO] [mixin/]: Compatibility level set to JAVA_25
+[NFAGENT] registered LB mixin configs into live FMLMixinService
+[NFAGENT] installed LB child-first fallback (chained to original=net.neoforged.fml.classloading.ResourceMaskingClassLoader)
+[NFAGENT] registered 940 LB packages into TCL.parentLoaders (mixin byte source)
+[13:05:52] [main/INFO] [Lithium/]: Loaded configuration file for Lithium: 171 options available, 0 override(s) found.
+[13:05:52] [main/INFO] [Sodium/]: Loaded configuration file for Sodium: 36 options available, 0 override(s) found
+[13:05:53] [main/WARN] [mixin/]: Error loading class: com/viaversion/viaversion/protocol/packet/PacketWrapperImpl (java.lang.ClassNotFoundException: com.viaversion.viaversion.protocol.packet.PacketWrapperImpl)
+[13:05:53] [main/INFO] [MixinExtras|Service/]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.4).
+[NFAGENT] hooked AddClientReloadListenersEvent.<init> (3229 -> 3620)
+[13:05:54] [Datafixer Bootstrap #0/INFO] [mojang/DataFixerBuilder]: 298 Datafixer optimizations took 299 milliseconds
+[13:05:58] [pool-10-thread-1/INFO] [LiquidBounce/]: Creative Tabs: [ Heads, Exploits ]
+[13:05:58] [pool-10-thread-1/INFO] [LiquidBounce/]: HitFXRegistry initialized 26 custom sounds.
+[13:05:58] [DefaultDispatcher-worker-1/INFO] [LiquidBounce/]: Successfully loaded 956 heads from HeadDB
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [teleport, location] and [teleport, destination] with inputs: [0.1 -0.5 .9, 0 0 0]
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [teleport, location] and [teleport, targets] with inputs: [0.1 -0.5 .9, 0 0 0]
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [teleport, destination] and [teleport, targets] with inputs: [Player, 0123, @e, dd12be42-52a9-4a91-a8a1-11c01849e498]
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [teleport, targets] and [teleport, destination] with inputs: [Player, 0123, dd12be42-52a9-4a91-a8a1-11c01849e498]
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [teleport, targets, location] and [teleport, targets, destination] with inputs: [0.1 -0.5 .9, 0 0 0]
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [time, set, time] and [time, set, timemarker] with inputs: [0, 0s, 0d, 0t]
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [time, set, timemarker] and [time, set, time] with inputs: [012]
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [time, of, clock, set, time] and [time, of, clock, set, timemarker] with inputs: [0, 0s, 0d, 0t]
+[13:05:58] [main/WARN] [minecraft/Commands]: Ambiguity between arguments [time, of, clock, set, timemarker] and [time, of, clock, set, time] with inputs: [012]
+[13:05:58] [modloading-worker-0/INFO] [ne.ne.ne.co.NeoForgeMod/NEOFORGE-MOD]: NeoForge mod loading, version 26.2.0.7-beta, for MC 26.2
+[13:05:59] [Render thread/INFO] [mojang/YggdrasilAuthenticationService]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[13:05:59] [Render thread/INFO] [minecraft/Minecraft]: Setting user: Dev
+[13:05:59] [Render thread/INFO] [Sodium/]: Setting exclusive fullscreen to true by default, as the user is not on Windows and the language cannot be guessed.
+[13:05:59] [Render thread/INFO] [minecraft/Minecraft]: Backend library: LWJGL version 3.4.1+2
+[13:05:59] [Render thread/INFO] [ImmediatelyFast/]: Initializing ImmediatelyFast 1.16.0+26.2 on llvmpipe (LLVM 20.1.2, 256 bits) (Mesa) with OpenGL 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+[13:05:59] [Render thread/INFO] [minecraft/Minecraft]: Using graphics backend OpenGL, using drivers: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+[13:05:59] [Render thread/INFO] [minecraft/Minecraft]: Using graphics device: llvmpipe (LLVM 20.1.2, 256 bits) (Mesa)
+[13:05:59] [Render thread/INFO] [minecraft/Minecraft]: Using graphics device extensions: GL_ARB_multi_draw_indirect, GL_ARB_buffer_storage, GL_ARB_shader_draw_parameters, GL_ARB_base_instance, GL_KHR_debug, GL_ARB_draw_indirect, GL_ARB_clip_control, GL_ARB_vertex_attrib_binding, GL_ARB_direct_state_access, GL_EXT_texture_filter_anisotropic
+[NFAGENT] registered LB reload listeners via AddClientReloadListenersEvent (mod-bus replicated)
+[13:06:00] [Render thread/INFO] [LiquidBounce/]: Launching LiquidBounce v0.38.1 by CCBlueX
+[13:06:00] [Render thread/INFO] [LiquidBounce/]: Client Version: 0.38.1 (git-0d53b6d)
+[13:06:00] [Render thread/INFO] [LiquidBounce/]: Client Branch: feat/vanilla-agent
+[13:06:00] [Render thread/INFO] [LiquidBounce/]: Operating System: Linux (6.17.0-35-generic)
+[13:06:00] [Render thread/INFO] [LiquidBounce/]: Java Version: 25.0.3
+[13:06:00] [Render thread/INFO] [LiquidBounce/]: Screen Resolution: 854x480
+[13:06:00] [Render thread/INFO] [LiquidBounce/]: Refresh Rate: 0 Hz
+[13:06:00] [Render thread/INFO] [minecraft/ReloadableResourceManager]: Reloading ResourceManager: vanilla, mod_resources, mod/sodium, mod/lithium, mod/immediatelyfast, mod/neoforge
+[13:06:00] [Render thread/INFO] [Sodium-GlSurface/]: Thread[#3,Render thread,10,main]
+[13:06:00] [Render thread/INFO] [Sodium-GlSurface/]: OpenGL Vendor: Mesa
+[13:06:00] [Render thread/INFO] [Sodium-GlSurface/]: OpenGL Renderer: llvmpipe (LLVM 20.1.2, 256 bits)
+[13:06:00] [Render thread/INFO] [Sodium-GlSurface/]: OpenGL Version: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+[13:06:00] [resourceLoad/INFO] [minecraft/UnihexProvider]: Found unifont_all_no_pua-17.0.01.hex, loading
+[13:06:00] [resourceLoad/INFO] [minecraft/UnihexProvider]: Found unifont_pua-17.0.01.hex, loading
+[13:06:00] [resourceLoad/INFO] [minecraft/UnihexProvider]: Found unifont_jp_patch-17.0.01.hex, loading
+[13:06:01] [Render thread/WARN] [mojang/GlProgram]: neoforge:pipeline/item_cutout_unlit shader program does not use sampler Sampler2 defined in the pipeline. This might be a bug.
+[13:06:01] [Render thread/WARN] [mojang/GlProgram]: neoforge:pipeline/item_translucent_unlit shader program does not use sampler Sampler2 defined in the pipeline. This might be a bug.
+[13:06:01] [Render thread/ERROR] [mojang/GlDevice]: Couldn't compile program for pipeline liquidbounce:pipeline/outline_quads: Duplicate bind name 'Globals' in bind group layout 2
+[13:06:01] [Render thread/ERROR] [mojang/GlDevice]: Couldn't compile program for pipeline liquidbounce:pipeline/outline_quads_no_color: Duplicate bind name 'Globals' in bind group layout 2
+[13:06:01] [Render thread/INFO] [LiquidBounce/]: Loaded 36 Render Pipelines.
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:bonk
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:boykisser-1
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:boykisser-2
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:boykisser-3
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:boykisser-4
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:boykisser-5
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:boykisser-6
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:bring
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:glass-1
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:glass-2
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:glass-3
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:click-1
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:click-2
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:click-3
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:meow
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:moan-1
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:moan-2
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:moan-3
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:moan-4
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:magic_squash
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:nya
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:pop
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:soft
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:squash
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:tung
+[13:06:01] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: liquidbounce:uwu
+[13:06:01] [Render thread/INFO] [mojang/Library]: OpenAL initialized on device Dummy Output
+[13:06:01] [Render thread/INFO] [minecraft/SoundEngine]: Sound engine started
+[13:06:01] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[13:06:01] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[13:06:01] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+[13:06:01] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[13:06:01] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[13:06:01] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[13:06:02] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[13:06:02] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[13:06:02] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[13:06:02] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[13:06:02] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[13:06:02] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[13:06:02] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[13:06:02] [Render thread/INFO] [ne.ne.ne.cl.en.an.js.AnimationLoader/]: Loaded 0 entity animations
+[13:06:02] [Render thread/INFO] [LiquidBounce/]: Initial session saved: Dev (380df991-f603-344c-a090-369bad2a924a)
+[To redirect Truffle log output to a file use one of the following options:
+* '--log.file=<path>' if the option is passed using a guest language launcher.
+* '-Dpolyglot.log.file=<path>' if the option is passed using the host Java launcher.
+* Configure logging using the polyglot embedding API.]
+[engine] WARNING: The polyglot engine uses a fallback runtime that does not support runtime compilation to native code.
+Execution without runtime compilation will negatively impact the guest application performance.
+The following cause was found: JVMCI is not enabled for this JVM. Enable JVMCI using -XX:+EnableJVMCI.
+For more information see: https://www.graalvm.org/latest/reference-manual/embed-languages/#runtime-optimization-support.
+To disable this warning use the '--engine.WarnInterpreterOnly=false' option or the '-Dpolyglot.engine.WarnInterpreterOnly=false' system property.
+[13:06:02] [resourceLoad/INFO] [LiquidBounce/]: [ScriptAPI] Engine Version: Development Build, Supported languages: [ js ]
+[13:06:02] [DefaultDispatcher-worker-1/INFO] [LiquidBounce/]: Loaded language en_us
+[13:06:02] [DefaultDispatcher-worker-1/INFO] [LiquidBounce/]: Requesting to login into Mojang...
+[13:06:02] [Netty Epoll IO #0/WARN] [LiquidBounce/]: Failed authentication to LiquidChat
+[13:06:03] [resourceLoad/INFO] [LiquidBounce/]: Initializing API...
+[13:06:03] [resourceLoad/INFO] [LiquidBounce/]: API Session Token: 1sj8fpE5GkYt9C9S
+[13:06:03] [resourceLoad/INFO] [LiquidBounce/]: Looking up available API endpoints...
+[13:06:03] [resourceLoad/INFO] [LiquidBounce/]: API endpoint 'https://api.liquidbounce.net' is available
+[13:06:03] [resourceLoad/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'account'.
+[13:06:03] [resourceLoad/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'account'.
+Exception in thread "OkHttpClient Dispatcher 2" net.ccbluex.liquidbounce.api.core.HttpException: GET https://api.liquidbounce.net/api/v1/version/newest/feat/vanilla-agent failed with code 404: 
+	at lb-agent-loader//net.ccbluex.liquidbounce.api.core.HttpClient.clientHttpApiInterceptor$lambda$0(HttpClient.kt:163)
+	at lb-agent-loader//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at lb-agent-loader//net.ccbluex.liquidbounce.authlib.interceptor.DefaultHeaderInterceptor.intercept(DefaultHeaderInterceptor.kt:13)
+	at lb-agent-loader//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at lb-agent-loader//net.ccbluex.liquidbounce.api.interceptors.CacheBlacklistInterceptor.intercept(CacheBlacklistInterceptor.kt:37)
+	at lb-agent-loader//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at lb-agent-loader//okhttp3.internal.connection.RealCall.getResponseWithInterceptorChain$okhttp(RealCall.kt:232)
+	at lb-agent-loader//okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:580)
+	at java.base/java.util.concurrent.ThreadPerTaskExecutor$TaskRunner.run(ThreadPerTaskExecutor.java:291)
+	at java.base/java.lang.VirtualThread.run(VirtualThread.java:460)
+[13:06:03] [DefaultDispatcher-worker-7/ERROR] [LiquidBounce/]: Unable to receive update information
+java.io.IOException: canceled due to net.ccbluex.liquidbounce.api.core.HttpException: GET https://api.liquidbounce.net/api/v1/version/newest/feat/vanilla-agent failed with code 404: 
+	at lb-agent-loader/okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:593) ~[okhttp-jvm-5.4.0.jar:?] {}
+	at java.base/java.util.concurrent.ThreadPerTaskExecutor$TaskRunner.run(ThreadPerTaskExecutor.java:291) ~[?:?] {}
+	at java.base/java.lang.VirtualThread.run(VirtualThread.java:460) ~[?:?] {}
+Caused by: net.ccbluex.liquidbounce.api.core.HttpException: GET https://api.liquidbounce.net/api/v1/version/newest/feat/vanilla-agent failed with code 404: 
+	at lb-agent-loader/net.ccbluex.liquidbounce.api.core.HttpClient.clientHttpApiInterceptor$lambda$0(HttpClient.kt:163) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332) ~[okhttp-jvm-5.4.0.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.authlib.interceptor.DefaultHeaderInterceptor.intercept(DefaultHeaderInterceptor.kt:13) ~[mc-authlib-1.7.0.jar:1.7.0] {}
+	at lb-agent-loader/okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332) ~[okhttp-jvm-5.4.0.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.api.interceptors.CacheBlacklistInterceptor.intercept(CacheBlacklistInterceptor.kt:37) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332) ~[okhttp-jvm-5.4.0.jar:?] {}
+	at lb-agent-loader/okhttp3.internal.connection.RealCall.getResponseWithInterceptorChain$okhttp(RealCall.kt:232) ~[okhttp-jvm-5.4.0.jar:?] {}
+	at lb-agent-loader/okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:580) ~[okhttp-jvm-5.4.0.jar:?] {}
+	... 2 more
+[13:06:03] [Render thread/INFO] [LiquidBounce/]: Successfully loaded 665 cosmetics carriers.
+[13:06:03] [resourceLoad/INFO] [LiquidBounce/]: API initialization done.
+[13:06:03] [Render thread/INFO] [HttpServer/]: Starting Netty server...
+[13:06:03] [NettyHttpServer-2-1/INFO] [io.ne.ha.lo.LoggingHandler/]: [id: 0x96dc0086] REGISTERED
+[13:06:03] [NettyHttpServer-2-1/INFO] [io.ne.ha.lo.LoggingHandler/]: [id: 0x96dc0086] BIND: ::/[0:0:0:0:0:0:0:0]:43117
+[13:06:03] [NettyHttpServer-2-1/INFO] [io.ne.ha.lo.LoggingHandler/]: [id: 0x96dc0086, L:/[0:0:0:0:0:0:0:0]:43117] ACTIVE
+[13:06:03] [Render thread/INFO] [HttpServer/]: Netty server started on port 43117.
+[13:06:03] [NettyHttpServer-2-1/INFO] [io.ne.ha.lo.LoggingHandler/]: [id: 0x96dc0086, L:/[0:0:0:0:0:0:0:0]:43117] READ: [id: 0x14abf940, L:/127.0.0.1:43117 - R:/127.0.0.1:35442]
+[13:06:03] [NettyHttpServer-2-1/INFO] [io.ne.ha.lo.LoggingHandler/]: [id: 0x96dc0086, L:/[0:0:0:0:0:0:0:0]:43117] READ COMPLETE
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-Black.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-Bold.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-ExtraBold.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-ExtraLight.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-Light.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-Medium.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-Regular.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-SemiBold.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded font Inter-Thin.ttf for theme LiquidBounce
+[13:06:04] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'marketplace'.
+[13:06:04] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'marketplace'.
+[13:06:04] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'theme'.
+[13:06:04] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'theme'.
+[13:06:04] [Render thread/INFO] [MCEF/]: JCEF Commit: aa20e50dbfb858ea50d3cf405b8202462dd10d96
+[13:06:04] [Render thread/INFO] [MCEF/]: Operating system: LINUX
+[13:06:04] [Render thread/INFO] [MCEF/]: Architecture: amd64
+[13:06:04] [Render thread/INFO] [MCEF/]: OS version: 6.17.0-35-generic
+[13:06:04] [DefaultDispatcher-worker-7/INFO] [MCEF/]: Downloading checksum file... [1/3]
+[13:06:04] [DefaultDispatcher-worker-1/INFO] [LiquidBounce/AI/]: Initializing engine...
+[13:06:04] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.jn.LibUtils/]: Uses override PYTORCH_FLAVOR: cpu
+[13:06:04] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.jn.LibUtils/]: Downloading https://publish.djl.ai/pytorch/2.7.1/cpu/linux-x86_64/native/lib/libc10.so.gz ...
+[13:06:04] [DefaultDispatcher-worker-7/INFO] [MCEF/]: Downloading JCEF... [1/3]
+[13:06:04] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.jn.LibUtils/]: Downloading https://publish.djl.ai/pytorch/2.7.1/cpu/linux-x86_64/native/lib/libtorch_cpu.so.gz ...
+[13:06:05] [Render thread/WARN] [LiquidBounce/]: Failed to place all characters (6156) on the atlas, using a reduced charset (5432) instead!
+[13:06:05] [DefaultDispatcher-worker-7/INFO] [ne.cc.li.mc.ut.MultiPartDownloader/]: Starting multipart download for task 'Downloading JCEF': contentLength=142373731, parts=8
+[13:06:05] [Render thread/INFO] [LiquidBounce/]: Completed loading fonts in 902 ms.
+[13:06:05] [Render thread/INFO] [LiquidBounce/]: Fonts: [ Inter Light, Inter Bold, Inter Medium, Inter Black, Inter SemiBold, Inter Regular, Inter ExtraBold, Inter ExtraLight, DejaVu Sans ]
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'client'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'client'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'theme'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'theme'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'modules'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'modules'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'proxy'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'proxy'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'accounts'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'accounts'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'friends'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'friends'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'account'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'account'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'spoofer'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'spoofer'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'settings'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'settings'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'marketplace'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'marketplace'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully loaded config 'storage'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ConfigSystem/]: Successfully stored config 'storage'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/]: LiquidBounce has been successfully initialized.
+[13:06:05] [Render thread/INFO] [LiquidBounce/Theme/]: Reloaded theme 'LiquidBounce'.
+[13:06:05] [Render thread/INFO] [LiquidBounce/ThemeManager/]: Reloaded 1 themes.
+[13:06:05] [Render thread/INFO] [LiquidBounce/Theme/]: Loaded background image for theme LiquidBounce
+[13:06:06] [DefaultDispatcher-worker-6/WARN] [LiquidBounce/]: No Discord client for RichPresence.
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.jn.LibUtils/]: Downloading https://publish.djl.ai/pytorch/2.7.1/cpu/linux-x86_64/native/lib/libgomp-98b21ff3.so.1.gz ...
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.jn.LibUtils/]: Downloading https://publish.djl.ai/pytorch/2.7.1/cpu/linux-x86_64/native/lib/libtorch.so.gz ...
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.jn.LibUtils/]: Downloading jni https://publish.djl.ai/pytorch/2.7.1/jnilib/0.36.0/linux-x86_64/cpu/libdjl_torch.so to cache ...
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.en.PtEngine/]: PyTorch graph executor optimizer is enabled, this may impact your inference latency and throughput. See: https://docs.djl.ai/master/docs/development/inference_performance_optimization.html#graph-executor-optimization
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.en.PtEngine/]: Number of inter-op threads is 8
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [ai.dj.py.en.PtEngine/]: Number of intra-op threads is 8
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [LiquidBounce/AI/]: Using deep learning engine PyTorch 2.7.1 on CPU.
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [LiquidBounce/AI/ModelManager/]: Loading models...
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [LiquidBounce/AI/ModelManager/]: Loaded model '21KC11KP' in 23ms.
+[13:06:07] [DefaultDispatcher-worker-1/INFO] [LiquidBounce/AI/ModelManager/]: Loaded model '19KC8KP' in 3ms.
+[13:06:08] [DefaultDispatcher-worker-7/INFO] [ne.cc.li.mc.ut.MultiPartDownloader/]: Finished multipart download for task 'Downloading JCEF': contentLength=142373731, parts=8
+[13:06:08] [DefaultDispatcher-worker-7/INFO] [MCEF/]: Extracting JCEF...
+[13:06:09] [Render thread/INFO] [LiquidBounce/BrowserBackendManager/]: Initializing browser...
+[13:06:09] [Render thread/INFO] [MCEF/]: Initializing CEF on linux_amd64...
+initialize on Thread[#3,Render thread,10,main] with library path /home/clawd/obus/liquidbounce-and-stuff/liquidbounce neoforge/LiquidBounce/neoforge/LiquidBounce/mcef/libraries/aa20e50dbfb858ea50d3cf405b8202462dd10d96/linux_amd64
+[13:06:09] [Render thread/INFO] [MCEF/]: Chromium Embedded Framework initialized
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering
+[13:06:09] [Render thread/WARN] [MCEF/]: No EGL context available for accelerated paint. Install WayGL mod.
+[13:06:09] [Render thread/INFO] [MCEF/]: Falling back to software rendering for browser
+[13:06:09] [Render thread/INFO] [LiquidBounce/BrowserBackendManager/]: Successfully initialized browser.
+[13:06:09] [Render thread/INFO] [LiquidBounce/ScreenManager/]: Browser backend is ready. Initializing browser...
+[13:06:09] [Render thread/ERROR] [LiquidBounce/]: Exception occurred in CoroutineScope of net.ccbluex.liquidbounce.integration.screen.ScreenManager@66da2007
+java.lang.NoClassDefFoundError: kotlin/jvm/internal/Intrinsics
+	at org.joml.Vector2iKt.component1(Vector2i.kt) ~[joml-1.10.8.jar:1.10.8] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowser.<init>(CefBrowser.kt:58) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowserBackend.createBrowser(CefBrowserBackend.kt:229) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowserBackend.createBrowser(CefBrowserBackend.kt:63) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.backend.BrowserBackend.createBrowser$default(BrowserBackend.kt:56) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.theme.ThemeManager.openInputAwareImmediate(ThemeManager.kt:198) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.theme.ThemeManager.openInputAwareImmediate$default(ThemeManager.kt:189) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.screen.ScreenManager$handleBrowserReady$1.invokeSuspend(ScreenManager.kt:98) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.screen.ScreenManager$handleBrowserReady$1.invoke(ScreenManager.kt) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.integration.screen.ScreenManager$handleBrowserReady$1.invoke(ScreenManager.kt) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/net.ccbluex.liquidbounce.event.SuspendHandlerBehavior$Parallel$createEventHook$1$1.invokeSuspend(SuspendHandlerBehavior.kt:56) ~[liquidbounce.jar:?] {}
+	at lb-agent-loader/kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34) [kotlin-stdlib-2.4.0.jar:2.4.0-release-281] {}
+	at lb-agent-loader/kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100) [kotlinx-coroutines-core-jvm-1.11.0.jar:1.11.0] {}
+	at TRANSFORMER/minecraft@26.2/net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:165) [minecraft-patched-26.2.0.7-beta.jar:?] {neoforge:access_transformer,neoforge:access_transformer}
+	at TRANSFORMER/minecraft@26.2/net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:24) [minecraft-patched-26.2.0.7-beta.jar:?] {}
+	at TRANSFORMER/minecraft@26.2/net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:140) [minecraft-patched-26.2.0.7-beta.jar:?] {neoforge:access_transformer,neoforge:access_transformer}
+	at TRANSFORMER/minecraft@26.2/net.minecraft.util.thread.BlockableEventLoop.runAllTasks(BlockableEventLoop.java:121) [minecraft-patched-26.2.0.7-beta.jar:?] {neoforge:access_transformer,neoforge:access_transformer}
+	at TRANSFORMER/minecraft@26.2/net.minecraft.client.Minecraft.runTick(Minecraft.java:1193) [minecraft-patched-26.2.0.7-beta.jar:?] {neoforge:access_transformer,neoforge:access_transformer,neoforge:mixin[APP:lithium-neoforge.mixins.json:startup.MinecraftMixin from mod lithium,APP:sodium-common.mixins.json:core.MinecraftMixin from mod sodium,APP:sodium-common.mixins.json:features.gui.hooks.debug.MinecraftRenderFrameMixin from mod sodium,APP:sodium-neoforge.mixins.json:platform.neoforge.EntrypointMixin from mod sodium,APP:immediatelyfast-common.mixins.json:core.MixinMinecraft from mod immediatelyfast,APP:liquidbounce.mixins.json:minecraft.client.MinecraftAccessor from mod (unknown),APP:liquidbounce.mixins.json:minecraft.client.MixinMinecraft from mod (unknown)]}
+	at TRANSFORMER/minecraft@26.2/net.minecraft.client.Minecraft.run(Minecraft.java:928) [minecraft-patched-26.2.0.7-beta.jar:?] {neoforge:access_transformer,neoforge:access_transformer,neoforge:mixin[APP:lithium-neoforge.mixins.json:startup.MinecraftMixin from mod lithium,APP:sodium-common.mixins.json:core.MinecraftMixin from mod sodium,APP:sodium-common.mixins.json:features.gui.hooks.debug.MinecraftRenderFrameMixin from mod sodium,APP:sodium-neoforge.mixins.json:platform.neoforge.EntrypointMixin from mod sodium,APP:immediatelyfast-common.mixins.json:core.MixinMinecraft from mod immediatelyfast,APP:liquidbounce.mixins.json:minecraft.client.MinecraftAccessor from mod (unknown),APP:liquidbounce.mixins.json:minecraft.client.MixinMinecraft from mod (unknown)]}
+	at TRANSFORMER/minecraft@26.2/net.minecraft.client.main.Main.main(Main.java:294) [minecraft-patched-26.2.0.7-beta.jar:?] {}
+	at net.neoforged.fml.startup.Client.main(Client.java:19) [loader-11.0.13.jar:11.0] {}
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104) ~[?:?] {}
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565) ~[?:?] {}
+	at net.neoforged.devlaunch.Main.main(Main.java:57) [DevLaunch-1.0.2.jar:?] {}
+Caused by: java.lang.ClassNotFoundException: kotlin.jvm.internal.Intrinsics
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:580) ~[?:?] {}
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:490) ~[?:?] {}
+	... 24 more

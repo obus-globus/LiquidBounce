@@ -1,0 +1,326 @@
+[VSPIKE] VanillaLauncher (self-contained): staging bundled LB payload
+[VSPIKE] staged 138 bundled LB jars to /tmp/lb-vanilla-agent-13555175004918877097
+[VSPIKE] AccessWidener: 131 directives
+[VSPIKE] +config liquidbounce.mixins.json
+[VSPIKE] +config liquidbounce-fabric.mixins.json
+[VSPIKE] MixinExtras bootstrapped
+[VSPIKE] phase=DEFAULT
+[VSPIKE] launching Minecraft via transforming loader
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.lwjgl.system.Library$$Lambda/0x0000000023280210 in an unnamed module (file:/home/clawd/.gradle/caches/modules-2/files-2.1/org.lwjgl/lwjgl/3.4.1/129e06a04f93992cb2a45172435b21fc4b60dd7d/lwjgl-3.4.1-unsafe.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.lwjgl.system.MemoryUtil (file:/home/clawd/.gradle/caches/modules-2/files-2.1/org.lwjgl/lwjgl/3.4.1/129e06a04f93992cb2a45172435b21fc4b60dd7d/lwjgl-3.4.1-unsafe.jar)
+WARNING: Please consider reporting this to the maintainers of class org.lwjgl.system.MemoryUtil
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[13:23:17] [Datafixer Bootstrap #0/INFO]: 295 Datafixer optimizations took 276 milliseconds
+[13:23:20] [main/INFO]: Creative Tabs: [  ]
+[13:23:20] [main/INFO]: HitFXRegistry initialized 26 custom sounds.
+[13:23:20] [main/INFO]: Completely ignored arguments: [--userType, legacy]
+[13:23:20] [Render thread/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[13:23:20] [Render thread/INFO]: Setting user: Dev
+[13:23:21] [Render thread/INFO]: Backend library: LWJGL version 3.4.1+2
+[13:23:21] [DefaultDispatcher-worker-1/INFO]: Successfully loaded 956 heads from HeadDB
+[13:23:21] [Download-2/ERROR]: Failed to fetch user properties
+com.mojang.authlib.exceptions.InvalidCredentialsException: Status: 401
+	at com.mojang.authlib.exceptions.MinecraftClientHttpException.toAuthenticationException(MinecraftClientHttpException.java:70)
+	at com.mojang.authlib.yggdrasil.YggdrasilUserApiService.fetchProperties(YggdrasilUserApiService.java:173)
+	at net.minecraft.client.Minecraft.lambda$new$1(Minecraft.java:438)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+Caused by: MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/attributes, error=null, errorMessage=null, details=null]]
+	at com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
+	at com.mojang.authlib.minecraft.client.MinecraftClient.readServiceResponse(MinecraftClient.java:147)
+	at com.mojang.authlib.minecraft.client.MinecraftClient.getWithEtag(MinecraftClient.java:81)
+	at com.mojang.authlib.minecraft.client.MinecraftClient.get(MinecraftClient.java:65)
+	at com.mojang.authlib.yggdrasil.YggdrasilUserApiService.fetchProperties(YggdrasilUserApiService.java:123)
+	... 5 more
+[13:23:21] [Render thread/INFO]: Using graphics backend OpenGL, using drivers: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+[13:23:21] [Render thread/INFO]: Using graphics device: llvmpipe (LLVM 20.1.2, 256 bits) (Mesa)
+[13:23:21] [Render thread/INFO]: Using graphics device extensions: GL_ARB_multi_draw_indirect, GL_ARB_buffer_storage, GL_ARB_shader_draw_parameters, GL_ARB_base_instance, GL_KHR_debug, GL_ARB_draw_indirect, GL_ARB_clip_control, GL_ARB_vertex_attrib_binding, GL_ARB_direct_state_access, GL_EXT_texture_filter_anisotropic
+[13:23:21] [Render thread/INFO]: Launching LiquidBounce v0.38.1 by CCBlueX
+[13:23:21] [Render thread/INFO]: Client Version: 0.38.1 (git-0e8148a)
+[13:23:21] [Render thread/INFO]: Client Branch: feat/vanilla-agent
+[13:23:21] [Render thread/INFO]: Operating System: Linux (6.17.0-35-generic)
+[13:23:21] [Render thread/INFO]: Java Version: 25.0.3
+[13:23:21] [Render thread/INFO]: Screen Resolution: 1280x800
+[13:23:21] [Render thread/INFO]: Refresh Rate: 0 Hz
+[13:23:21] [Render thread/WARN]: Failed to register resource reloader!
+[13:23:21] [Render thread/ERROR]: Failed to save initial session
+java.lang.NullPointerException: profileKeyPairManager must not be null
+	at net.ccbluex.liquidbounce.features.account.AccountManager.<clinit>(AccountManager.kt:429)
+	at net.ccbluex.liquidbounce.LiquidBounce$initializeManagers$2.invokeSuspend(LiquidBounce.kt:270)
+	at net.ccbluex.liquidbounce.LiquidBounce$initializeManagers$2.invoke(LiquidBounce.kt)
+	at net.ccbluex.liquidbounce.LiquidBounce$initializeManagers$2.invoke(LiquidBounce.kt)
+	at lb-lib//kotlinx.coroutines.intrinsics.UndispatchedKt.startUndispatched(Undispatched.kt:66)
+	at lb-lib//kotlinx.coroutines.intrinsics.UndispatchedKt.startUndispatchedOrReturn(Undispatched.kt:43)
+	at lb-lib//kotlinx.coroutines.BuildersKt__Builders_commonKt.withContext(Builders.common.kt:497)
+	at lb-lib//kotlinx.coroutines.BuildersKt.withContext(Unknown Source)
+	at net.ccbluex.liquidbounce.LiquidBounce.initializeManagers(LiquidBounce.kt:250)
+	at net.ccbluex.liquidbounce.LiquidBounce.access$initializeManagers(LiquidBounce.kt:106)
+	at net.ccbluex.liquidbounce.LiquidBounce$initializeClient$1.invokeSuspend(LiquidBounce.kt:211)
+	at lb-lib//kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at lb-lib//kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:173)
+	at net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:23)
+	at net.minecraft.util.thread.BlockableEventLoop.execute(BlockableEventLoop.java:114)
+	at lb-lib//kotlinx.coroutines.ExecutorCoroutineDispatcherImpl.dispatch(Executors.kt:135)
+	at net.ccbluex.liquidbounce.utils.kotlin.ConcurrentExtensionsKt$MinecraftDispatcher$1.dispatch(ConcurrentExtensions.kt:48)
+	at lb-lib//kotlinx.coroutines.internal.DispatchedContinuationKt.safeDispatch(DispatchedContinuation.kt:254)
+	at lb-lib//kotlinx.coroutines.internal.DispatchedContinuationKt.resumeCancellableWithInternal(DispatchedContinuation.kt:327)
+	at lb-lib//kotlinx.coroutines.intrinsics.CancellableKt.startCoroutineCancellable(Cancellable.kt:26)
+	at lb-lib//kotlinx.coroutines.CoroutineStart.invoke(CoroutineStart.kt:358)
+	at lb-lib//kotlinx.coroutines.AbstractCoroutine.start(AbstractCoroutine.kt:134)
+	at lb-lib//kotlinx.coroutines.future.FutureKt.future(Future.kt:61)
+	at lb-lib//kotlinx.coroutines.future.FutureKt.future$default(Future.kt:51)
+	at net.ccbluex.liquidbounce.LiquidBounce.initializeClient(LiquidBounce.kt:201)
+	at net.ccbluex.liquidbounce.LiquidBounce.startHandler$lambda$0(LiquidBounce.kt:484)
+	at net.ccbluex.liquidbounce.event.EventManager.callEvent(EventManager.kt:350)
+	at net.minecraft.client.Minecraft.handler$zbf000$startClient(Minecraft.java:3754)
+	at net.minecraft.client.Minecraft.<init>(Minecraft.java:726)
+	at net.minecraft.client.main.Main.main(Main.java:278)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at vspike.VanillaLauncher.main(VanillaLauncher.java:109)
+[13:23:21] [Render thread/INFO]: Loaded language en_us
+[13:23:21] [Download-2/INFO]: Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: 0
+[13:23:21] [Download-2/ERROR]: Failed to fetch Realms feature flags
+com.mojang.realmsclient.exception.RealmsServiceException: Realms authentication error with message 'java.lang.RuntimeException: Failed to parse into SignedJWT: 0'
+	at com.mojang.realmsclient.client.RealmsClient.execute(RealmsClient.java:528)
+	at com.mojang.realmsclient.client.RealmsClient.fetchFeatureFlags(RealmsClient.java:187)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[To redirect Truffle log output to a file use one of the following options:
+* '--log.file=<path>' if the option is passed using a guest language launcher.
+* '-Dpolyglot.log.file=<path>' if the option is passed using the host Java launcher.
+* Configure logging using the polyglot embedding API.]
+[engine] WARNING: The polyglot engine uses a fallback runtime that does not support runtime compilation to native code.
+Execution without runtime compilation will negatively impact the guest application performance.
+The following cause was found: JVMCI is not enabled for this JVM. Enable JVMCI using -XX:+EnableJVMCI.
+For more information see: https://www.graalvm.org/latest/reference-manual/embed-languages/#runtime-optimization-support.
+To disable this warning use the '--engine.WarnInterpreterOnly=false' option or the '-Dpolyglot.engine.WarnInterpreterOnly=false' system property.
+[13:23:21] [DefaultDispatcher-worker-1/INFO]: [ScriptAPI] Engine Version: Development Build, Supported languages: [ js ]
+[13:23:22] [Render thread/INFO]: Reloading ResourceManager: vanilla
+[13:23:22] [Worker-Main-7/INFO]: Found unifont_pua-17.0.01.hex, loading
+[13:23:22] [Worker-Main-3/INFO]: Found unifont_all_no_pua-17.0.01.hex, loading
+[13:23:22] [Worker-Main-4/INFO]: Found unifont_jp_patch-17.0.01.hex, loading
+[13:23:24] [Render thread/INFO]: Requesting to login into Mojang...
+[13:23:24] [DefaultDispatcher-worker-2/INFO]: Initializing API...
+[13:23:24] [DefaultDispatcher-worker-2/INFO]: API Session Token: TUjo9ST36CXhUpvo
+[13:23:24] [DefaultDispatcher-worker-2/INFO]: Looking up available API endpoints...
+[13:23:24] [Render thread/ERROR]: Couldn't compile program for pipeline liquidbounce:pipeline/outline_quads: Duplicate bind name 'Globals' in bind group layout 2
+[13:23:24] [Render thread/ERROR]: Couldn't compile program for pipeline liquidbounce:pipeline/outline_quads_no_color: Duplicate bind name 'Globals' in bind group layout 2
+[13:23:24] [Render thread/INFO]: Loaded 39 Render Pipelines.
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:bonk
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:boykisser-1
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:boykisser-2
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:boykisser-3
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:boykisser-4
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:boykisser-5
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:boykisser-6
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:bring
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:glass-1
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:glass-2
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:glass-3
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:click-1
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:click-2
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:click-3
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:meow
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:moan-1
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:moan-2
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:moan-3
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:moan-4
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:magic_squash
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:nya
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:pop
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:soft
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:squash
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:tung
+[13:23:24] [Render thread/WARN]: Missing sound for event: liquidbounce:uwu
+[13:23:24] [Render thread/ERROR]: Error starting SoundSystem. Turning off sounds & music
+java.lang.IllegalStateException: Failed to open OpenAL device
+	at com.mojang.blaze3d.audio.Library.openDeviceOrFallback(Library.java:275)
+	at com.mojang.blaze3d.audio.Library.init(Library.java:150)
+	at net.minecraft.client.sounds.SoundEngine.loadLibrary(SoundEngine.java:120)
+	at net.minecraft.client.sounds.SoundEngine.reload(SoundEngine.java:109)
+	at net.minecraft.client.sounds.SoundManager.apply(SoundManager.java:122)
+	at net.minecraft.client.sounds.SoundManager.apply(SoundManager.java:41)
+	at net.minecraft.server.packs.resources.SimplePreparableReloadListener.lambda$reload$1(SimplePreparableReloadListener.java:15)
+	at java.base/java.util.concurrent.CompletableFuture$UniAccept.tryFire(CompletableFuture.java:739)
+	at java.base/java.util.concurrent.CompletableFuture$Completion.run(CompletableFuture.java:503)
+	at net.minecraft.server.packs.resources.SimpleReloadInstance.lambda$prepareTasks$3(SimpleReloadInstance.java:59)
+	at net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:173)
+	at net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:23)
+	at net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:147)
+	at net.minecraft.util.thread.BlockableEventLoop.runAllTasks(BlockableEventLoop.java:127)
+	at net.minecraft.client.Minecraft.runTick(Minecraft.java:1235)
+	at net.minecraft.client.Minecraft.run(Minecraft.java:959)
+	at net.minecraft.client.main.Main.main(Main.java:292)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at vspike.VanillaLauncher.main(VanillaLauncher.java:109)
+[13:23:24] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[13:23:24] [DefaultDispatcher-worker-2/INFO]: API endpoint 'https://api.liquidbounce.net' is available
+[13:23:24] [DefaultDispatcher-worker-2/INFO]: Successfully loaded config 'account'.
+[13:23:24] [DefaultDispatcher-worker-2/INFO]: Successfully stored config 'account'.
+[13:23:24] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[13:23:24] [Render thread/INFO]: Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+Exception in thread "OkHttpClient Dispatcher 4" [13:23:24] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[13:23:24] [DefaultDispatcher-worker-2/ERROR]: Unable to receive update information
+java.io.IOException: canceled due to net.ccbluex.liquidbounce.api.core.HttpException: GET https://api.liquidbounce.net/api/v1/version/newest/feat/vanilla-agent failed with code 404: 
+	at lb-lib//okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:593)
+	at java.base/java.util.concurrent.ThreadPerTaskExecutor$TaskRunner.run(ThreadPerTaskExecutor.java:291)
+	at java.base/java.lang.VirtualThread.run(VirtualThread.java:460)
+Caused by: net.ccbluex.liquidbounce.api.core.HttpException: GET https://api.liquidbounce.net/api/v1/version/newest/feat/vanilla-agent failed with code 404: 
+	at net.ccbluex.liquidbounce.api.core.HttpClient.clientHttpApiInterceptor$lambda$0(HttpClient.kt:163)
+	at lb-lib//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at net.ccbluex.liquidbounce.authlib.interceptor.DefaultHeaderInterceptor.intercept(DefaultHeaderInterceptor.kt:13)
+	at lb-lib//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at net.ccbluex.liquidbounce.api.interceptors.CacheBlacklistInterceptor.intercept(CacheBlacklistInterceptor.kt:37)
+	at lb-lib//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at lb-lib//okhttp3.internal.connection.RealCall.getResponseWithInterceptorChain$okhttp(RealCall.kt:232)
+	at lb-lib//okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:580)
+	... 2 more
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: net.ccbluex.liquidbounce.api.core.HttpException: GET https://api.liquidbounce.net/api/v1/version/newest/feat/vanilla-agent failed with code 404: 
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at net.ccbluex.liquidbounce.api.core.HttpClient.clientHttpApiInterceptor$lambda$0(HttpClient.kt:163)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at lb-lib//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at net.ccbluex.liquidbounce.authlib.interceptor.DefaultHeaderInterceptor.intercept(DefaultHeaderInterceptor.kt:13)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at lb-lib//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at net.ccbluex.liquidbounce.api.interceptors.CacheBlacklistInterceptor.intercept(CacheBlacklistInterceptor.kt:37)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at lb-lib//okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at lb-lib//okhttp3.internal.connection.RealCall.getResponseWithInterceptorChain$okhttp(RealCall.kt:232)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at lb-lib//okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:580)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at java.base/java.util.concurrent.ThreadPerTaskExecutor$TaskRunner.run(ThreadPerTaskExecutor.java:291)
+[13:23:24] [OkHttpClient Dispatcher 4/INFO]: [STDERR]: 	at java.base/java.lang.VirtualThread.run(VirtualThread.java:460)
+[13:23:24] [Netty Epoll IO #0/WARN]: Failed authentication to LiquidChat
+[13:23:24] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[13:23:24] [Render thread/INFO]: Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[13:23:24] [DefaultDispatcher-worker-6/INFO]: API initialization done.
+[13:23:24] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[13:23:24] [Render thread/INFO]: Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[13:23:24] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[13:23:24] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[13:23:24] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[13:23:24] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[13:23:24] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[13:23:24] [Render thread/INFO]: Successfully loaded 665 cosmetics carriers.
+[13:23:24] [Render thread/INFO]: Starting Netty server...
+[13:23:24] [NettyHttpServer-2-1/INFO]: [id: 0xe127dd39] REGISTERED
+[13:23:24] [NettyHttpServer-2-1/INFO]: [id: 0xe127dd39] BIND: 0.0.0.0/0.0.0.0:43401
+[13:23:24] [NettyHttpServer-2-1/INFO]: [id: 0xe127dd39, L:/[0:0:0:0:0:0:0:0]:43401] ACTIVE
+[13:23:24] [Render thread/INFO]: Netty server started on port 43401.
+[13:23:24] [NettyHttpServer-2-1/INFO]: [id: 0xe127dd39, L:/[0:0:0:0:0:0:0:0]:43401] READ: [id: 0x8b5e09ce, L:/127.0.0.1:43401 - R:/127.0.0.1:47582]
+[13:23:24] [NettyHttpServer-2-1/INFO]: [id: 0xe127dd39, L:/[0:0:0:0:0:0:0:0]:43401] READ COMPLETE
+[13:23:24] [Download-2/INFO]: Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: 0
+[13:23:24] [Download-2/ERROR]: Couldn't connect to realms
+com.mojang.realmsclient.exception.RealmsServiceException: Realms authentication error with message 'java.lang.RuntimeException: Failed to parse into SignedJWT: 0'
+	at com.mojang.realmsclient.client.RealmsClient.execute(RealmsClient.java:528)
+	at com.mojang.realmsclient.client.RealmsClient.clientCompatible(RealmsClient.java:308)
+	at com.mojang.realmsclient.RealmsAvailability.lambda$check$0(RealmsAvailability.java:48)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[13:23:25] [Render thread/INFO]: Loaded font Inter-Black.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Loaded font Inter-Bold.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Loaded font Inter-ExtraBold.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Loaded font Inter-ExtraLight.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Loaded font Inter-Light.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Loaded font Inter-Medium.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Loaded font Inter-Regular.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Loaded font Inter-SemiBold.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Loaded font Inter-Thin.ttf for theme LiquidBounce
+[13:23:25] [Render thread/INFO]: Successfully loaded config 'marketplace'.
+[13:23:25] [Render thread/INFO]: Successfully stored config 'marketplace'.
+[13:23:25] [Render thread/INFO]: Successfully loaded config 'theme'.
+[13:23:25] [Render thread/INFO]: Successfully stored config 'theme'.
+[13:23:25] [Render thread/INFO]: JCEF Commit: aa20e50dbfb858ea50d3cf405b8202462dd10d96
+[13:23:25] [Render thread/INFO]: Operating system: LINUX
+[13:23:25] [Render thread/INFO]: Architecture: amd64
+[13:23:25] [Render thread/INFO]: OS version: 6.17.0-35-generic
+[13:23:26] [Render thread/INFO]: Checksum matches: true
+[13:23:26] [Render thread/INFO]: Platform directory exists: true
+[13:23:26] [Render thread/INFO]: Initializing browser...
+[13:23:26] [Render thread/INFO]: Initializing CEF on linux_amd64...
+[13:23:26] [Render thread/INFO]: [STDOUT]: initialize on Thread[#3,Render thread,10,main] with library path /home/clawd/obus/liquidbounce-and-stuff/liquidbounce neoforge/LiquidBounce/LiquidBounce/mcef/libraries/aa20e50dbfb858ea50d3cf405b8202462dd10d96/linux_amd64
+[13:23:26] [Render thread/INFO]: Chromium Embedded Framework initialized
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering
+[13:23:26] [Render thread/WARN]: No EGL context available for accelerated paint. Install WayGL mod.
+[13:23:26] [Render thread/INFO]: Falling back to software rendering for browser
+[13:23:26] [Render thread/INFO]: Successfully initialized browser.
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: Initializing engine...
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: Uses override PYTORCH_FLAVOR: cpu
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: PyTorch graph executor optimizer is enabled, this may impact your inference latency and throughput. See: https://docs.djl.ai/master/docs/development/inference_performance_optimization.html#graph-executor-optimization
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: Number of inter-op threads is 8
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: Number of intra-op threads is 8
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: Using deep learning engine PyTorch 2.7.1 on CPU.
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: Loading models...
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: Loaded model '21KC11KP' in 24ms.
+[13:23:26] [DefaultDispatcher-worker-6/INFO]: Loaded model '19KC8KP' in 7ms.
+[13:23:26] [Render thread/WARN]: Failed to place all characters (6156) on the atlas, using a reduced charset (5432) instead!
+[13:23:27] [Render thread/INFO]: Completed loading fonts in 1052 ms.
+[13:23:27] [Render thread/INFO]: Fonts: [ Inter Light, Inter Bold, Inter Medium, Inter Black, Inter SemiBold, Inter Regular, Inter ExtraBold, Inter ExtraLight, DejaVu Sans ]
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'client'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'client'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'theme'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'theme'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'modules'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'modules'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'proxy'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'proxy'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'accounts'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'accounts'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'friends'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'friends'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'account'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'account'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'spoofer'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'spoofer'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'settings'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'settings'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'marketplace'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'marketplace'.
+[13:23:27] [Render thread/INFO]: Successfully loaded config 'storage'.
+[13:23:27] [Render thread/INFO]: Successfully stored config 'storage'.
+[13:23:27] [Render thread/INFO]: LiquidBounce has been successfully initialized.
+[13:23:27] [Render thread/INFO]: Reloaded theme 'LiquidBounce'.
+[13:23:27] [Render thread/INFO]: Reloaded 1 themes.
+[13:23:27] [Render thread/INFO]: Browser backend is ready. Initializing browser...
+[13:23:27] [Render thread/ERROR]: Exception occurred in CoroutineScope of net.ccbluex.liquidbounce.integration.screen.ScreenManager@1a26f1ba
+java.lang.NoClassDefFoundError: kotlin/jvm/internal/Intrinsics
+	at org.joml.Vector2iKt.component1(Vector2i.kt)
+	at net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowser.<init>(CefBrowser.kt:58)
+	at net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowserBackend.createBrowser(CefBrowserBackend.kt:229)
+	at net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowserBackend.createBrowser(CefBrowserBackend.kt:63)
+	at net.ccbluex.liquidbounce.integration.backend.BrowserBackend.createBrowser$default(BrowserBackend.kt:56)
+	at net.ccbluex.liquidbounce.integration.theme.ThemeManager.openInputAwareImmediate(ThemeManager.kt:198)
+	at net.ccbluex.liquidbounce.integration.theme.ThemeManager.openInputAwareImmediate$default(ThemeManager.kt:189)
+	at net.ccbluex.liquidbounce.integration.screen.ScreenManager$handleBrowserReady$1.invokeSuspend(ScreenManager.kt:98)
+	at net.ccbluex.liquidbounce.integration.screen.ScreenManager$handleBrowserReady$1.invoke(ScreenManager.kt)
+	at net.ccbluex.liquidbounce.integration.screen.ScreenManager$handleBrowserReady$1.invoke(ScreenManager.kt)
+	at net.ccbluex.liquidbounce.event.SuspendHandlerBehavior$Parallel$createEventHook$1$1.invokeSuspend(SuspendHandlerBehavior.kt:56)
+	at lb-lib//kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at lb-lib//kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:173)
+	at net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:23)
+	at net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:147)
+	at net.minecraft.util.thread.BlockableEventLoop.runAllTasks(BlockableEventLoop.java:127)
+	at net.minecraft.client.Minecraft.runTick(Minecraft.java:1235)
+	at net.minecraft.client.Minecraft.run(Minecraft.java:959)
+	at net.minecraft.client.main.Main.main(Main.java:292)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at vspike.VanillaLauncher.main(VanillaLauncher.java:109)
+Caused by: java.lang.ClassNotFoundException: kotlin.jvm.internal.Intrinsics
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:580)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:490)
+	... 23 more
+[13:23:27] [Render thread/INFO]: Loaded background image for theme LiquidBounce
+[13:23:28] [DefaultDispatcher-worker-6/WARN]: No Discord client for RichPresence.
