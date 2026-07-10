@@ -97,3 +97,13 @@ DEFERRED TO ON-LOAD PATH (named, only retro-apply-to-already-loaded coverage los
 ItemCooldownsAddition.Entry: same class of build-time LB-rewrite (type-reference rewrite) as rewriteCaller --
 relocate the nested record to a standalone type and rewrite the descriptor in the 2 ModuleBetterInventory
 consumers. No new capability vs the demonstrated caller-rewrite; not separately live-demoed.
+
+## FUTURE TO-DO (deferred, low value — scorpion's call): bespoke per-case rewrites for the 5 hard @Local
+Pursue LATER, after the main attach-to-running integration. They stay on the on-load fallback for now.
+Feature relevance (traced): 4/5 are cosmetic-UI or internal-optimization, 1 is a niche exploit:
+- MixinPlayerTabOverlay.hookTabColumnHeight (LocalIntRef) -> ModuleBetterTab layout      [minor cosmetic-UI]
+- MixinPlayerTabOverlay.hookRenderPlayerBackground (loop i) -> ModuleBetterTab background [minor cosmetic-UI]
+- MixinChatComponent.hookAddVisibleMessage (lines) -> ModuleBetterChat message stacking   [minor cosmetic-UI]
+- MixinScreenRectangle (pooled Vector2f) -> Pools.Vec2f GUI allocation reduction           [internal-optimization]
+- MixinFireworkRocketEntity.hookExtendedFirework (ordinal Vec3) -> ModuleExtendedFirework  [niche exploit: elytra-firework boost]
+All 5 work fully on a launch-time inject; only retro-apply-into-an-already-running-game loses them.
