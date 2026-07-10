@@ -414,3 +414,47 @@ tasks.named("sourcesJar") {
 tasks.named("build") {
     dependsOn("copyZipInclude")
 }
+
+// ===== Self-contained Fabric agent (productionization; docs/fabric-agent-selfcontained) =====
+// Packages a single `-javaagent` jar carrying LB's classes + full non-loader dep tree + the
+// AccessWidener. Reproducible: the dep set is filtered from runtimeClasspath by maven group
+// (LB-owned groups kept; MC/loader/fabric-api/optional-mods dropped). No hand-listing, no /tmp.
+sourceSets {
+    create("scagent") {
+        java.srcDir("docs/fabric-agent-selfcontained/src")
+        compileClasspath += sourceSets.main.get().compileClasspath
+    }
+}
+tasks.register<Jar>("lbClassesForAgent") {
+    dependsOn("classes", "processResources")
+    archiveFileName.set("liquidbounce.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("agent/tmp"))
+    from(sourceSets.main.get().output) // LB compiled classes + resources (mixin json, AW, assets)
+}
+tasks.register<Jar>("fabricSelfContainedAgentJar") {
+    group = "liquidbounce"
+    description = "Single self-contained -javaagent jar (LB + full dep tree + AW), no mod install."
+    dependsOn("scagentClasses", "lbClassesForAgent")
+    archiveFileName.set("liquidbounce-agent-fabric.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("agent"))
+    manifest { attributes("Premain-Class" to "scagent.SCAgent") }
+    from(sourceSets["scagent"].output)                      // agent classes at jar root
+    from("src/main/resources/liquidbounce.accesswidener")   // AW at jar root (jar-relative read)
+    val keepGroups = setOf(
+        "ai.djl", "ai.djl.pytorch", "com.github.oryxel1", "com.google.errorprone", "com.jagrosh",
+        "com.kohlschutter.junixsocket", "com.seedfinding", "com.squareup.okhttp3", "com.squareup.okio",
+        "com.thealtening.api", "com.vdurmont", "com.viaversion.mcstructs", "de.florianreuth",
+        "io.github.llamalad7", "io.jsonwebtoken", "net.ccbluex", "net.jodah", "net.lenni0451",
+        "net.lenni0451.commons", "net.lenni0451.mcstructs-bedrock", "org.ahocorasick", "org.apache.tika",
+        "org.jetbrains.kotlin", "org.jetbrains.kotlinx", "team.unnamed"
+    )
+    into("agent-libs") {
+        from(tasks.named<Jar>("lbClassesForAgent").flatMap { it.archiveFile })
+        from(configurations.runtimeClasspath.get().filter { f ->
+            if (!f.name.endsWith(".jar")) return@filter false
+            val p = f.absolutePath
+            val g = if (p.contains("files-2.1/")) p.substringAfter("files-2.1/").substringBefore("/") else ""
+            g in keepGroups || g.startsWith("org.graalvm") || (g == "net.raphimc" && f.name.startsWith("MinecraftAuth"))
+        })
+    }
+}
