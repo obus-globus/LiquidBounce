@@ -38,7 +38,9 @@ public final class NFAgent {
     static final String TCL = "net.neoforged.fml.classloading.transformation.TransformingClassLoader";
     static final String TARGET_AT = "net/neoforged/fml/common/asm/AccessTransformerService";
     static final String TARGET_FACADE = "net/neoforged/fml/loading/mixin/MixinFacade";
-    static final String TARGET_NFPLATFORM = "net/ccbluex/liquidbounce/platform/neoforge/NeoForgePlatform";
+    static final String TARGET_RELOAD_EVENT = "net/neoforged/neoforge/client/event/AddClientReloadListenersEvent";
+    static final ClassDesc CD_NeoForgePlatform = ClassDesc.of("net.ccbluex.liquidbounce.platform.neoforge.NeoForgePlatform");
+    static final ClassDesc CD_AddClientReloadEvent = ClassDesc.of("net.neoforged.neoforge.client.event.AddClientReloadListenersEvent");
 
     static final ClassDesc CD_System = ClassDesc.of("java.lang.System");
     static final ClassDesc CD_PrintStream = ClassDesc.of("java.io.PrintStream");
@@ -123,7 +125,7 @@ public final class NFAgent {
 
             if (TARGET_AT.equals(name)) return hookAt(buf);
             if (TARGET_FACADE.equals(name)) return hookFacade(buf);
-            if (TARGET_NFPLATFORM.equals(name)) return hookPlatform(buf);
+            if (TARGET_RELOAD_EVENT.equals(name)) return hookReloadEvent(buf);
             if ("net/neoforged/fml/startup/FatalErrorReporting".equals(name)) return hookFatal(buf);
             return null;
         }
@@ -142,18 +144,21 @@ public final class NFAgent {
             ClassTransform ct = (cb, cle) -> {
                 if (cle instanceof MethodModel mm && mm.methodName().equalsString("<init>")) {
                     cb.transformMethod(mm, MethodTransform.transformingCode(new CodeTransform() {
-                        @Override public void atEnd(CodeBuilder cob) {
-                            cob.aload(1) // AccessTransformerEngine engine (constructor param 1)
-                               .new_(CD_FileReader).dup()
-                               .ldc("lb.at").invokestatic(CD_System, "getProperty", MTD_getProperty, false)
-                               .invokespecial(CD_FileReader, "<init>", MTD_frInit)
-                               .ldc("liquidbounce")
-                               .invokeinterface(CD_ATEngine, "loadAT", MTD_loadAT);
-                            cob.getstatic(CD_System, "out", CD_PrintStream)
-                               .ldc("[NFAGENT] loaded LB AccessTransformer into FML AT engine")
-                               .invokevirtual(CD_PrintStream, "println", MTD_println);
+                        // inject BEFORE the constructor's return (atEnd would be unreachable, after return)
+                        @Override public void accept(CodeBuilder cob, CodeElement e) {
+                            if (e instanceof java.lang.classfile.instruction.ReturnInstruction) {
+                                cob.aload(1) // AccessTransformerEngine engine (constructor param 1)
+                                   .new_(CD_FileReader).dup()
+                                   .ldc("lb.at").invokestatic(CD_System, "getProperty", MTD_getProperty, false)
+                                   .invokespecial(CD_FileReader, "<init>", MTD_frInit)
+                                   .ldc("liquidbounce")
+                                   .invokeinterface(CD_ATEngine, "loadAT", MTD_loadAT);
+                                cob.getstatic(CD_System, "out", CD_PrintStream)
+                                   .ldc("[NFAGENT] loaded LB AccessTransformer into FML AT engine")
+                                   .invokevirtual(CD_PrintStream, "println", MTD_println);
+                            }
+                            cob.accept(e);
                         }
-                        @Override public void accept(CodeBuilder cob, CodeElement e) { cob.accept(e); }
                     }));
                 } else cb.accept(cle);
             };
@@ -188,32 +193,41 @@ public final class NFAgent {
     }
 
     /**
-     * Root fix for the no-mod-bus init gap. NeoForgePlatform.registerResourceReloadListeners returns
-     * true whenever the listener ids are known — WITHOUT checking that the @Mod mod-bus
-     * AddClientReloadListenersEvent actually added the LazyReloadListener wrappers. With no ModFile
-     * that event never fires, so no wrapper is in the resource manager, yet the method still returns
-     * true and LB's designed direct-reload fallback (initializeClient + theme reload) never runs —
-     * modules never register (KillAura circular-init crash) and the MCEF menu never loads. We force
-     * it to return false so LB takes its own intended fallback path, which runs registerInbuilt() on
-     * the render thread during ClientStartEvent (before any render frame) and reloads the theme.
+     * Root fix for the no-mod-bus init gap. LB registers its client reload listeners via NeoForge's
+     * AddClientReloadListenersEvent (mod bus). With no ModFile that event never reaches LB, so its
+     * reload listeners are never added and initializeClient() never runs at the correct time (during
+     * the initial resource reload, before the first render tick). We replicate the mod-bus dispatch:
+     * hook AddClientReloadListenersEvent.<init> and call NeoForgePlatform.onAddReloadListeners(this),
+     * which adds LB's LazyReloadListener wrappers to the event exactly as the @Mod handler would.
+     * initializeClient then runs at reload time (module registration + theme), matching the mod path
+     * — fixing the KillAura init-order crash AND the render-timing crash (init racing tick 0).
      */
-    static byte[] hookPlatform(byte[] buf) {
+    static byte[] hookReloadEvent(byte[] buf) {
         try {
             ClassFile cf = ClassFile.of();
             ClassModel cm = cf.parse(buf);
-            byte[] out = cf.build(cm.thisClass().asSymbol(), cb -> {
-                for (var e : cm) {
-                    if (e instanceof MethodModel mm && mm.methodName().equalsString("registerResourceReloadListeners")) {
-                        cb.withMethod(mm.methodName().stringValue(), mm.methodTypeSymbol(),
-                                mm.flags().flagsMask(), mb -> mb.withCode(cob -> cob.iconst_0().ireturn()));
-                    } else {
-                        cb.with(e);
-                    }
-                }
-            });
-            System.out.println("[NFAGENT] forced NeoForgePlatform.registerResourceReloadListeners=false (LB runs its no-mod-bus init fallback)");
+            MethodTypeDesc onAdd = MethodTypeDesc.of(CD_void, CD_AddClientReloadEvent);
+            ClassTransform ct = (cb, cle) -> {
+                if (cle instanceof MethodModel mm && mm.methodName().equalsString("<init>")) {
+                    cb.transformMethod(mm, MethodTransform.transformingCode(new CodeTransform() {
+                        // inject BEFORE the constructor's return (atEnd would be unreachable, after return)
+                        @Override public void accept(CodeBuilder cob, CodeElement e) {
+                            if (e instanceof java.lang.classfile.instruction.ReturnInstruction) {
+                                cob.aload(0) // the event
+                                   .invokestatic(CD_NeoForgePlatform, "onAddReloadListeners", onAdd, false);
+                                cob.getstatic(CD_System, "out", CD_PrintStream)
+                                   .ldc("[NFAGENT] registered LB reload listeners via AddClientReloadListenersEvent (mod-bus replicated)")
+                                   .invokevirtual(CD_PrintStream, "println", MTD_println);
+                            }
+                            cob.accept(e);
+                        }
+                    }));
+                } else cb.accept(cle);
+            };
+            byte[] out = cf.transformClass(cm, ct);
+            System.out.println("[NFAGENT] hooked AddClientReloadListenersEvent.<init> (" + buf.length + " -> " + out.length + ")");
             return out;
-        } catch (Throwable t) { System.out.println("[NFAGENT] platform hook FAILED: " + t); return null; }
+        } catch (Throwable t) { System.out.println("[NFAGENT] reload-event hook FAILED: " + t); return null; }
     }
 
     /** Diagnostic: print the fatal Throwable to console (the GL error screen hangs under software GL). */

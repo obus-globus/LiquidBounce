@@ -1,0 +1,11 @@
+65:[NFAGENT] hooked MixinFacade.finishInitialization (14486 -> 14936)
+70:[NFAGENT] hooked AccessTransformerService.<init> (2849 -> 3257)
+71:[NFAGENT] loaded LB AccessTransformer into FML AT engine
+84:[NFAGENT] installed LB child-first fallback (chained to original=net.neoforged.fml.classloading.ResourceMaskingClassLoader)
+89:[NFAGENT] hooked AddClientReloadListenersEvent.<init> (3229 -> 3620)
+105:[10:13:47] [Render thread/INFO] [minecraft/Minecraft]: Setting user: Dev
+111:[NFAGENT] registered LB reload listeners via AddClientReloadListenersEvent (mod-bus replicated)
+112:[10:13:48] [Render thread/INFO] [LiquidBounce/]: Launching LiquidBounce v0.38.1 by CCBlueX
+119:[10:13:48] [Render thread/INFO] [minecraft/ReloadableResourceManager]: Reloading ResourceManager: vanilla, mod_resources, mod/sodium, mod/lithium, mod/mcef, mod/immediatelyfast, mod/neoforge
+131:[10:13:50] [Render thread/INFO] [LiquidBounce/]: Loaded 36 Render Pipelines.
+339:[10:15:21] [Render thread/INFO] [minecraft/AdvancementTree]: Loaded 1688 advancements

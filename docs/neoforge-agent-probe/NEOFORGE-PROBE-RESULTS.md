@@ -218,6 +218,48 @@ gaps rather than a single fix. Per the stop-and-surface guard, this is a judgmen
 NeoForge in-world parity is worth the depth — vanilla and Fabric already give a working
 agent-injection path, and NeoForge's mechanism (kill-shots + init) is proven.
 
+### (c) module functional in-world + MCEF menu — **GREEN (achieved)**
+
+Two real root fixes closed it (not seam-by-seam patches):
+
+1. **Init timing = replicate the mod-bus reload-listener registration.** LB's `initializeClient()`
+   (module registration `ModuleManager.registerInbuilt()` + theme/MCEF) runs as a client resource
+   **reload listener**, which as a mod is registered via NeoForge's `AddClientReloadListenersEvent`
+   (mod bus). With no ModFile that never happens, so `initializeClient` never ran at the correct
+   time — the offhand-render mixin touched `ModuleKillAura` before it was initialized (circular
+   `<clinit>` crash) and, when forced early, LB's render setup raced tick-0 texture upload
+   (`Missing uniform Globals`). Fix: hook `AddClientReloadListenersEvent.<init>` and call
+   `NeoForgePlatform.onAddReloadListeners(this)` — exactly the mod-bus handler. Now `initializeClient`
+   runs during the initial (blocking) resource reload, before any render frame, like the baseline.
+
+2. **ClassFile `atEnd`-on-`<init>` was silently a no-op.** Injecting at `atEnd` places code *after*
+   the constructor's `return` → unreachable → never runs. This had silently broken BOTH the AT hook
+   (LB's AccessTransformer was never loaded) and the reload-listener hook. Fixed by injecting before
+   the `ReturnInstruction` instead. Now `[NFAGENT] loaded LB AccessTransformer` and
+   `[NFAGENT] registered LB reload listeners` both actually execute.
+
+**Result** (`nf-lb-working-proof.log`, LB deregistered — mod list = sodium/lithium/mcef/
+immediatelyfast/neoforge, **no liquidbounce**):
+- LB's **MCEF main menu renders** (`nf-lb-mcef-menu.png`) — identical to the mod baseline; MCEF
+  navigation works (Singleplayer → world list → join).
+- **No crash** — modules register in order (KillAura/NoSlow circular-init gone), no render crash.
+- **Fly module functions in-world** — survival world, F3 measured **Y 67.00 → 100.76 (+33.76
+  blocks)**, X/Z unchanged (pure vertical ascent): `nf-fly-before.png` / `nf-fly-after.png`.
+
+Loaded entirely by the agent (fallback loader + AT into FML's engine + configs into FMLMixinService
++ reload-listener registration), not as a ModFile.
+
+## VERDICT (updated): agent-injection works in-world on all three loaders
+
+vanilla ✓ (full), Fabric ✓ (full, Fly in-world), **NeoForge ✓ (full, Fly in-world + MCEF menu)**.
+
+### Reproduce (c)
+```
+docs/neoforge-agent-probe/neoforge-agent-run.sh     # builds agent from committed sources, boots LB via agent to MCEF menu
+# for the Fly proof: pre-enable Fly in neoforge/run/LiquidBounce/modules.json, then in the MCEF
+# menu: Singleplayer -> a survival world -> join; F3 shows the Y ascent while flying.
+```
+
 ## Reproduce Tier 2
 ```
 docs/neoforge-agent-probe/
