@@ -127,3 +127,49 @@ missing trailing newline fused two classpath entries.
 - This is a **PoC via a throwaway launcher**, not a productionized `:vanilla` Gradle
   subproject. Productionizing = fold `run.sh` into a real subproject that emits a fat
   agent jar, fix the 2 mixins, and decide the MCEF/Via/DJL bundling policy.
+
+---
+
+## Functional smoke test — honest scorecard
+
+Drove the client menu → creative world → ClickGUI → toggled modules across categories,
+watching for toggle-but-no-effect and errors during operation.
+
+**Works (verified):**
+- **Boots consistently** — two independent `run.sh` launches, identical 2 mixin
+  fallbacks, no intermittent classloader/verify errors between runs.
+- **Full MCEF UI** — custom menu, ClickGUI (all categories), theme, fonts, ArrayList
+  HUD (shows enabled modules), ClientChat (live network messages).
+- **Render modules function** — **Xray** confirmed: terrain rendered transparent, ores
+  + lava exposed (`lb-module-xray-working.png`) vs the solid landscape
+  (`lb-inworld-clean-render.png`). Module toggle + on/off signal work across categories.
+- **World renders correctly** in steady state (the checkerboard is only during initial
+  chunk load, then clears — see the clean-render shot).
+
+**Broken / degraded (honest):**
+- **~20+ modules silently no-op** because `PlayerMoveEvent`,
+  `PlayerNetworkMovementTickEvent` and `PlayerTickEvent` are dispatched **only** by
+  `MixinLocalPlayer`, which falls back. So **most Movement modules and many
+  Combat/Player modules toggle on but do nothing.** This is the load-bearing impact of
+  the "2 fallback mixins" — one of them (`MixinLocalPlayer`) powers 17 core events.
+  Not cosmetic.
+- Combat silent server-side rotations + reach (`sendPosition`/`pick` hooks) are gone →
+  aim/reach modules degraded.
+- Vanilla chat enhancements (`MixinChatComponent`: copy-highlight, anti-clear) degraded;
+  the ClientChat *module* is unaffected.
+
+**Root cause + fix (small, known):** both fallbacks are **named-local** injectors
+(`@ModifyVariable(method="sendPosition", name="rot")` and `@Local(name="lines")`) that
+can't resolve because the vanilla 26.2 jar lacks LVT names for those two specific
+methods (the other 12 named-`@Local` mixins resolve fine). Fix = switch those two to
+**ordinal-based** `@Local`/`@ModifyVariable`. Once `MixinLocalPlayer` applies, the 17
+events fire and the movement/combat modules work. This is the gating fix for "usable
+client" vs "boots + render only".
+
+**Stability caveat:** MCEF/Chromium crashed once (`libcef.so` SIGILL) under rapid
+ClickGUI interaction on **software GL** (llvmpipe). Boot is stable; this is a Chromium
+software-rendering fragility (likely absent on a real GPU), but a real risk under heavy
+UI use. The vanilla-agent infrastructure (classloader/mixin/AW) ran clean throughout —
+the crash was entirely inside CEF native code.
+
+**Not tested:** a module *settings* value-change (the CEF crash cut the session short).
