@@ -1,5 +1,10 @@
 # Self-contained vanilla LiquidBounce agent
 
+> **Superseded by the pure `-javaagent`** (`PURE-AGENT.md` / `:vanillaPureAgentJar`): vanilla is now a
+> true drop-in agent attached to stock `Main` like Fabric/NeoForge, no launcher main class. This
+> launcher-based artifact remains as the transforming-classloader reference.
+
+
 A **single fat jar** that runs LiquidBounce on **unmodified vanilla Minecraft 26.2**
 with no Gradle, no hand-assembled classpath, no `-javaagent` surgery, no `-Dlb.*`
 dev paths. It bundles LB's full dep tree **plus the Mixin infrastructure vanilla

@@ -557,3 +557,60 @@ tasks.register<Jar>("vanillaSelfContainedAgentJar") {
         })
     }
 }
+
+// ===== Pure -javaagent vanilla artifact (supersedes the VanillaLauncher main-class approach) =====
+// Same bundle as vanillaSelfContainedAgentJar but a Premain-Class agent: attaches to stock
+// net.minecraft.client.main.Main on bare vanilla, appends LB+deps to the system loader, transforms MC in
+// place, and defines Mixin's synthetics into the system loader (from the synthetic registry). No launcher,
+// no custom main class, no kotlin-at-root hack (the append puts LB kotlin on the system loader with JOML).
+tasks.register<Jar>("vanillaPureAgentJar") {
+    group = "liquidbounce"
+    description = "Pure -javaagent: LB on bare vanilla via stock Main, no launcher main class."
+    dependsOn("vspikeClasses", "lbClassesForVanilla")
+    archiveFileName.set("liquidbounce-agent-vanilla-pure.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("agent-vanilla"))
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    val asmJars = configurations.runtimeClasspath.get().files.filter { it.name.matches(Regex("asm(-\\w+)?-\\d.*\\.jar")) }
+    val spongeJar = configurations.runtimeClasspath.get().files.filter { it.name.startsWith("sponge-mixin") }
+    val asmVer = asmJars.first { it.name.matches(Regex("asm-\\d.*\\.jar")) }.name.removePrefix("asm-").removeSuffix(".jar")
+    manifest {
+        attributes("Premain-Class" to "vspike.PureVanillaAgent",
+                   "Can-Retransform-Classes" to "true", "Can-Redefine-Classes" to "true")
+        attributes(mapOf("Implementation-Title" to "ASM", "Implementation-Version" to asmVer), "org/objectweb/asm/")
+    }
+    // Mixin framework + VSpike service at root (system loader); drop rival service files/signatures/module-info.
+    val infra = asmJars + spongeJar + vspikeMixinExtras.files
+    from(infra.map { zipTree(it) }) {
+        exclude("META-INF/services/**", "module-info.class", "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "META-INF/MANIFEST.MF")
+    }
+    from(sourceSets["vspike"].output) { exclude("net/ccbluex/**") }   // vspike.* incl. PureVanillaAgent
+    from("docs/vanilla-agent-selfcontained/agent-meta")               // our standalone Mixin service SPI
+    // LB payload (extracted + appended to the system loader at premain): LB classes/resources + LB-owned deps.
+    val dropGroups = setOf(
+        "org.lwjgl", "io.netty", "com.mojang", "org.apache.logging.log4j", "org.apache.commons",
+        "net.java.dev.jna", "org.slf4j", "org.jspecify", "org.joml", "org.jcraft", "net.sf.jopt-simple",
+        "it.unimi.dsi", "com.google.guava", "com.ibm.icu", "com.github.oshi", "commons-io", "commons-codec",
+        "com.google.code.gson", "com.azure", "com.microsoft.azure", "org.ow2.asm", "io.github.llamalad7",
+        "net.fabricmc", "maven.modrinth", "ca.weblite", "at.yawk.lz4"
+    )
+    into("agent-libs") {
+        from(tasks.named<Jar>("lbClassesForVanilla").flatMap { it.archiveFile })
+        from(configurations.runtimeClasspath.get().filter { f ->
+            if (!f.name.endsWith(".jar")) return@filter false
+            val p = f.absolutePath
+            if (p.contains("loom-cache") || f.name.contains("minecraft-merged")) return@filter false
+            if (f.name.startsWith("fabric-loader") || f.name.startsWith("sponge-mixin")) return@filter false
+            if (f.name.startsWith("lwjgl-egl")) return@filter true      // MCEF needs org.lwjgl.egl (bare vanilla omits it)
+            val g = if (p.contains("files-2.1/")) p.substringAfter("files-2.1/").substringBefore("/") else ""
+            g !in dropGroups
+        })
+    }
+    if (project.hasProperty("bundleMcefNative")) {
+        val nd = file((project.findProperty("mcefNativeDir") as String?)
+            ?: "$rootDir/LiquidBounce/mcef/libraries/aa20e50dbfb858ea50d3cf405b8202462dd10d96/linux_amd64")
+        if (!nd.isDirectory) throw GradleException("bundleMcefNative: native dir not found: $nd (pass -PmcefNativeDir=)")
+        from(nd) { into("mcef-native") }
+        logger.lifecycle("bundleMcefNative ON: bundling MCEF native from $nd")
+    }
+}
