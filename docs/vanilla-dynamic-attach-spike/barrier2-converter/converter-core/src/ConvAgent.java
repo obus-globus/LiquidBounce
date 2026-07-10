@@ -75,6 +75,21 @@ public class ConvAgent {
         }, true);
         try { inst.retransformClasses(target); System.out.println("[CONVAUTO] retransformClasses(ALREADY-LOADED Minecraft) with AUTO-CONVERTED bytes: SUCCESS"); }
         catch (Throwable e) { System.out.println("[CONVAUTO] retransform FAILED -> " + e); e.printStackTrace(); }
+        // --- interface-adder caller rewrite (build-time LB-caller-rewrite over bundled LB classes) ---
+        Map<String,String[]> ifaceMap = new HashMap<>();
+        for (String di : r.droppedInterfaces) ifaceMap.put(di, new String[]{internal, r.sidecarName});
+        if (!ifaceMap.isEmpty()) {
+            try {
+                Class<?> callerCls = Class.forName("vspike.TestCaller", false, SYS);
+                byte[] cb; try (var in = SYS.getResourceAsStream("vspike/TestCaller.class")) { cb = in.readAllBytes(); }
+                final byte[] cr = RetransformConverter.rewriteCaller(cb, ifaceMap);
+                inst.addTransformer(new ClassFileTransformer() { public byte[] transform(ClassLoader l, String n, Class<?> c, ProtectionDomain p, byte[] b) { return "vspike/TestCaller".equals(n) ? cr : null; } }, true);
+                inst.retransformClasses(callerCls);
+                Object mc = Class.forName("net.minecraft.client.Minecraft", false, SYS).getMethod("getInstance").invoke(null);
+                int x = (int) callerCls.getMethod("call", Object.class).invoke(null, mc);
+                System.out.println("[CONVAUTO][LIVE] interface-adder: dropped " + ifaceMap.keySet() + " on target + rewrote LB caller; TestCaller.call(minecraft)=" + x + " (no ClassCastException, hook via sidecar)");
+            } catch (Throwable e) { System.out.println("[CONVAUTO] caller-rewrite FAILED -> " + e); e.printStackTrace(); }
+        }
     }
 
     static void defineSynthetics(byte[] classBytes, ProtectionDomain pd) {

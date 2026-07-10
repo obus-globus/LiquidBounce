@@ -288,6 +288,27 @@ public class RetransformConverter {
         clinit.instructions.insertBefore(ret, add); clinit.maxStack = Math.max(clinit.maxStack, 3);
     }
 
+    /** Build-time LB-caller rewrite: ((Iface)o).m(args) -> Sidecar.h$m((Target)o, args), for interfaces the
+     *  converter dropped from their target. ifaceMap: ifaceInternal -> [targetInternal, sidecarInternal]. */
+    public static byte[] rewriteCaller(byte[] callerBytes, Map<String,String[]> ifaceMap) {
+        ClassNode c = read(callerBytes); int n = 0;
+        for (MethodNode m : c.methods) {
+            if (m.instructions == null) continue;
+            for (AbstractInsnNode p = m.instructions.getFirst(), nx; p != null; p = nx) {
+                nx = p.getNext();
+                if (p instanceof TypeInsnNode ti && ti.getOpcode() == Opcodes.CHECKCAST && ifaceMap.containsKey(ti.desc)) {
+                    ti.desc = ifaceMap.get(ti.desc)[0];     // CHECKCAST Iface -> CHECKCAST Target (o is really the target)
+                    n++;
+                } else if (p instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKEINTERFACE && ifaceMap.containsKey(mi.owner)) {
+                    String[] ts = ifaceMap.get(mi.owner);
+                    m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, ts[1], "h$" + mi.name, "(L" + ts[0] + ";" + mi.desc.substring(1), false));
+                    n++;
+                }
+            }
+        }
+        return n == 0 ? callerBytes : write(c, callerBytes);
+    }
+
     // ---- io ----
     static ClassNode read(byte[] b) { ClassReader r = new ClassReader(b); ClassNode n = new ClassNode(); r.accept(n, ClassReader.SKIP_FRAMES); return n; }
     static byte[] write(ClassNode n, byte[] orig) {

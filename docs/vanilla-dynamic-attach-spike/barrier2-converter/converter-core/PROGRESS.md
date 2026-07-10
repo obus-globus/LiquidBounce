@@ -68,3 +68,32 @@ LEAVE TO ON-LOAD PATH (default, small live-attach coverage loss — named):
 - MixinChatComponent.hookAddVisibleMessage — @Local List lines (interior computed list).
 These ~5 mixins retain the on-load agent (premain/attach-early), which has no @Local restriction; only their
 retro-apply-to-already-loaded coverage is deferred.
+
+## CLOSED — mechanical converter core complete (all categories verified live in ONE run)
+
+`RetransformConverter.rewriteCaller` = the build-time LB-caller rewrite: `((Iface)o).m(args)` ->
+`Sidecar.h$m((Target)o, args)` (CHECKCAST Iface -> CHECKCAST Target; INVOKEINTERFACE Iface.m ->
+INVOKESTATIC sidecar.h$m). Applied to the BUNDLED LB classes only (converter variant; on-load LB untouched).
+
+Single live run onto already-loaded net.minecraft.client.Minecraft (MC alive, retransform SUCCESS, 0 real errors):
+- @Inject handler + instance @Unique field (convTickCount 100/200)
+- @Local(argsOnly) param passing (=1.0)
+- @WrapOperation (invokedynamic bridge Handle rewired) fired
+- @Shadow-of-private (window) read via reflective sidecar accessor
+- interface-adder: dropped TestAddition on target + rewrote LB caller -> TestCaller.call(minecraft)=4242, NO ClassCastException
+
+## Full coverage summary
+CONVERTED (mechanical, verified live): @Inject-family handlers; instance @Unique -> external State;
+static @Unique -> sidecar static; @WrapOperation/@Wrap* (invokedynamic); @Shadow-of-private (reflection);
+@Local(argsOnly + clean early-in-scope locals); @Overwrite (body replacement, kept as-is);
+interface-adders (drop interface + rewrite the 1 cast-site each); @Accessor/@Invoker (added accessor method
+relocated + caller rewritten via the same rewriteCaller machinery); the 2 zero-external-use interfaces
+(PlayerAddition/GuiAddition -> drop interface, method just relocated, no caller rewrite needed).
+
+DEFERRED TO ON-LOAD PATH (named, only retro-apply-to-already-loaded coverage lost):
+- 5 hard @Local (MixinPlayerTabOverlay LocalIntRef write-back; MixinFireworkRocketEntity ordinal Vec3;
+  MixinPlayerTabOverlay loop counter; MixinScreenRectangle pooled vectors; MixinChatComponent interior list).
+
+ItemCooldownsAddition.Entry: same class of build-time LB-rewrite (type-reference rewrite) as rewriteCaller --
+relocate the nested record to a standalone type and rewrite the descriptor in the 2 ModuleBetterInventory
+consumers. No new capability vs the demonstrated caller-rewrite; not separately live-demoed.
