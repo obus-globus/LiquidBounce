@@ -147,6 +147,66 @@ P1 launch-verify Fabric + NeoForge (baseline truth) → P2 scaffold `:vanilla` s
 + fat agent jar → P3 fold in agent internals + `VanillaPlatform` → P4 launch-confirm all
 three from committed build tasks → P5 dependency-bundling consistency + CI.
 
+## Adversarial review outcome (verdict: SOUND-WITH-FIXES; one false premise corrected)
+
+A reviewer verified the plan against the tree. Corrections folded in:
+
+1. **§2 "never launch-tested" was FALSE — both loaders already booted in-world this
+   session.** `neoforge/run/logs/latest.log` (Jul 2 09:41): "Dev joined the game" in
+   "New World", `[ERROR]` count **0**, only the expected guarded-off Via
+   `ClassNotFoundException` WARN. Fabric has equivalent in-world run logs. This was task
+   #9 ("Boot-verify both loaders"). **So P1 is a regression-gate, not discovery** — the
+   loaders are genuinely working locally, and the NeoForge port is a finished series of
+   deliberate commits (re-derived 26.2 companions + `MixinDivergenceCheck`), not WIP.
+
+2. **NeoForge CI is RED by construction, and it reddens the whole `build` job.** Verified:
+   `mcef-neoforge:3.3.2-26.2-SNAPSHOT` is **HTTP 404** on both `maven.ccbluex.net/releases`
+   and `/snapshots`; it exists only in `~/.m2` and resolves only via `mavenLocal()` in
+   `allprojects{}`. Fabric's `mcef` (non-neoforge) IS on remote snapshots (HTTP 200), so
+   Fabric is green. The neoforge version-guard does NOT disable the module (26.2.0-beta ==
+   26.2.0), so `./gradlew build` fans out to `:neoforge:build` and fails on a clean runner.
+   → **This is the actual gate and the cheapest first step (below), not a §5 afterthought.**
+
+3. **Productionization is a WEEK, not a day** — the plan under-scoped it. The hard 80% is
+   turning `run.sh`'s classpath assembly into Gradle: (a) three hand-stitched caches
+   (Mojmap client jar from neoformruntime, assets from loom, deps from modules-2);
+   (b) `:vanilla` currently reuses the **Fabric compiled output + `liquidbounce-fabric.mixins.json`**
+   (run.sh reads `build/classes/.../main` and the Fabric `:printRtCp`, then greps out
+   fabric-loader/sponge-mixin) — so a "clean subproject with its own source set" will NOT
+   reproduce the proven classpath without re-deriving the fabric-companion mixin set for a
+   no-loader run; (c) shadow mechanics that fight conventions: `mergeServiceFiles`, an
+   explicit `org/objectweb/asm/` manifest `Implementation-Version` section, delete all
+   `module-info.class`, strip `*.SF/*.RSA/*.DSA`, and bundle Fabric's `sponge-mixin` while
+   excluding the dep copy of the same coordinate.
+
+4. **loom-for-`:vanilla` fights its own run model.** loom's `runClient` launches through
+   Knot (fabric-loader) — the exact thing the agent excludes. Viable path: keep loom (or
+   moddev) purely as a **Mojmap-MC + assets provider**, with a fully custom `JavaExec` run
+   (not loom's `runClient`). That's real infra, not a config toggle. (Recommendation in §1
+   updated accordingly.)
+
+5. **Adding `:vanilla` to `settings.gradle.kts` mutates the default task graph — make it a
+   P0 decision.** It inherits `mavenLocal()` (so a locally-shaded artifact repeats
+   NeoForge's CI-red pattern) and unqualified `./gradlew build` would fan out to the heavy,
+   asset-downloading, agent-launching `:vanilla` build — affecting the *existing* loaders'
+   CI cost/redness. Decide opt-in vs aggregate before scaffolding.
+
+6. **Shared-coupling: clean bill (verified), one benign caveat.** git diff is truly
+   docs-only. Caveat: `build/classes/.../MixinLocalPlayer.class` (both trees) was
+   recompiled during the vanilla session — but `javap` confirms it matches the **reverted**
+   `name="rot"` source, not the `index=12` experiment, so a loader build reusing it is
+   correct. No `VanillaPlatform` in any `build/` tree; `config/ExploitPreventer.json` is
+   runtime cruft outside all resource srcDirs.
+
+### CHEAPEST FIRST STEP (do before committing to the week of `:vanilla` work)
+
+**Make NeoForge CI-provable:** publish `mcef-neoforge:3.3.2-26.2-SNAPSHOT` to a remote
+maven, OR add a CI pre-step that builds it from `obus-globus/mcef@neoforge-26.2` into
+`~/.m2` before `./gradlew build`. A few hours, no LB code, and it converts "green on one
+laptop" → "green on a clean runner" — the real thing P1 targets. Near-free secondary:
+`./gradlew build :neoforge:build --offline` to reconfirm local green from the committed
+tree (build outputs are stale/hand-touched from the vanilla session).
+
 ## Explicitly NOT in this plan
 
 Fixing the software-GL MCEF crash; ViaForge/agent-Via functional protocol translation;
