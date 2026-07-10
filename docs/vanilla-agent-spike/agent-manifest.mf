@@ -1,0 +1,8 @@
+Manifest-Version: 1.0
+Premain-Class: vspike.Agent
+Can-Retransform-Classes: true
+Can-Redefine-Classes: true
+
+Name: org/objectweb/asm/
+Implementation-Title: ASM
+Implementation-Version: 9.9.1
