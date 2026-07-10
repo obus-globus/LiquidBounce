@@ -78,3 +78,52 @@ The mapping problem is gone (26.2 is Mojmap), the bootstrap + AW + mixin mechani
 proven, and MC runs under the agent. The `:vanilla` subproject (plan P0–P3) is now a
 matter of engineering (fat-jar packaging, `VanillaPlatform`, the loader-API shims,
 excluding MCEF/Via link deps) rather than unproven risk.
+
+---
+
+## Full-client PoC (P1–P3) + clean-room reproduction
+
+`run.sh` (committed here) launches **full LiquidBounce v0.38.1 on unmodified vanilla
+Minecraft 26.2** via the transforming classloader — no `-javaagent` surgery, no
+hand-assembled classpath. It rebuilds the agent jar, `VanillaPlatform`, corrected
+resources and the whole classpath from committed sources + Gradle output/caches.
+
+**Reproduce:**
+```
+./gradlew classes processResources         # once, to populate build/classes + caches
+docs/vanilla-agent-spike/run.sh            # launches on Xvfb :99 (override VSPIKE_DISPLAY)
+```
+Verified via a clean-room run (hand-built work dir moved aside, fresh `/tmp/vspike-run`):
+reaches the LiquidBounce menu + ClickGUI, `config 'modules'` loaded, MCEF browser ready.
+See `lb-cleanroom-reproduction.png`. The clean-room test caught (and the script now
+fixes) two path bugs: an unquoted `find` broke on the space in the repo path, and a
+missing trailing newline fused two classpath entries.
+
+**Extra integration pieces the full client needed (beyond the spike):**
+- Exclude `fabric-loader` + the dependency copy of `sponge-mixin` from the classpath —
+  they ship rival Mixin services (`FabricGlobalPropertyService`) that get selected and
+  NPE without a Knot launcher.
+- `MixinExtrasBootstrap.init()` **after** the transformer exists (LB leans on
+  `@WrapOperation`/`@ModifyExpressionValue`/`@Local`).
+- A **transforming classloader** (not a bare `-javaagent`) so Mixin's runtime *synthetic*
+  classes (`org.spongepowered.asm.synthetic.*`, from `@ModifyArgs`) can be generated on
+  demand; a `ClassFileTransformer` can only transform existing bytes, not create classes.
+- Self-load exactly the MC-owned packages (`net.minecraft`, `com.mojang.{blaze3d,math,
+  realmsclient}`, `net.ccbluex`) and delegate everything else to the parent — otherwise
+  JDK-module `IllegalAccessError` (xerces) and `VerifyError` (two `Screen` classes from
+  split loaders). Keep authlib on the parent (it makes runtime anonymous classes).
+- The loader falls back to un-mixed bytes if a single mixin fails to apply, so one bad
+  mixin degrades a feature instead of crashing the game.
+
+## Known PoC limitations (NOT regressions)
+
+- **2 of ~150 mixins fall back** (load un-mixed, non-fatal): `MixinLocalPlayer`
+  (`@Local` on `sendPosition` — LVT metadata missing in the vanilla jar) and
+  `MixinChatComponent`. Their features are degraded; everything else applies. To fix
+  for production: switch those to ordinal-based `@Local` or verify the target LVT.
+- **Software-GL checkerboard terrain** in-world is an **llvmpipe (Mesa software GL)**
+  artifact of this headless VM — not the agent. MCEF renders crisply because it's a
+  separate software-rendered surface. On a real GPU the world renders normally.
+- This is a **PoC via a throwaway launcher**, not a productionized `:vanilla` Gradle
+  subproject. Productionizing = fold `run.sh` into a real subproject that emits a fat
+  agent jar, fix the 2 mixins, and decide the MCEF/Via/DJL bundling policy.

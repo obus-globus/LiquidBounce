@@ -1,0 +1,10 @@
+// Dumps the root project's runtime classpath to /tmp for the vanilla agent launcher.
+allprojects {
+  tasks.register("printRtCp") {
+    doLast {
+      def cfg = configurations.findByName("runtimeClasspath")
+      if (cfg != null) new File(System.getProperty("vspike.cpOut")).text =
+        cfg.files.collect { it.absolutePath }.join("\n") + "\n"   // trailing newline for safe cat-concat
+    }
+  }
+}
