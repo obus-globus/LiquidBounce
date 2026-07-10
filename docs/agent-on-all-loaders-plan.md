@@ -148,6 +148,71 @@ wants NeoForge agent-injection.
 - **If the use case is "just run LB on Fabric/NeoForge," the mod path already works** and
   is far cheaper — recommend that unless "attach without installing" is a hard requirement.
 
+## Adversarial review outcome (verdict: SOUND-WITH-FIXES — mechanism viable on Fabric)
+
+Two reviewers + my own jar checks. **The Fabric defer mechanism is viable** (I initially
+mis-read the timing as "closed"; the deep jar analysis corrected me, and I re-verified it).
+Corrections, all confirmed against `fabric-loader-0.19.3.jar` + `sponge-mixin-0.17.3`:
+
+- **Timing window is REAL (verified).** `Knot.init` order is `FabricMixinBootstrap.init`
+  (147) → `finishMixinBootstrapping` (148, advances Mixin to DEFAULT via `gotoPhase`) →
+  `initializeTransformers` (150, just *instantiates* the transformer) → `invokeEntrypoints
+  ("preLaunch")` (156). Phase being DEFAULT does **not** close the window: config selection
+  is lazy — `MixinProcessor.checkSelect` re-runs `select()` while
+  `Mixins.getUnvisitedCount() > 0 && transformedCount == 0` (I verified this bytecode), and
+  `transformedCount` only increments after the first **game class** is transformed, which
+  is *after* PreLaunch (PreLaunch runs "several seconds before" the game main). So a late
+  `addConfiguration` at PreLaunch **is** picked up. This is exactly how dynamic-mixin Fabric
+  mods already work.
+- **AW API in the plan was wrong.** Fabric 0.19.3 has **no** `FabricLauncherBase.AccessWidener`
+  — AW is the **ClassTweaker** system (`FabricLoaderImpl.getClassTweaker()`/`loadClassTweakers`,
+  verified present). It is not sealed: `ClassTweakerReader.create(getClassTweaker()).read(
+  lbAwBytes, ns)` feeds entries late, honored at transform time by `FabricTransformer` —
+  *provided the target class hasn't been read yet* (same window). **Bonus:** this
+  auto-dodges the vanilla LVTGeneratorError crux — `MixinServiceKnot.getClassBytes` routes
+  Mixin's `ClassInfo` metadata through the AW/ClassTweaker pass, so **no bytecode-provider
+  patch is needed on Fabric** (unlike vanilla).
+- **Only ONE non-mod hook is real; drop the other.** The plan's "synthetic PreLaunch
+  entrypoint" (option i) is **not** non-mod — entrypoints are `ModContainerImpl`-keyed, so
+  registering one means being a discovered mod. The genuinely non-mod route is (option ii)
+  **premain `Instrumentation`-rewrite of `Knot`/`FabricMixinBootstrap`** — verified viable
+  because those load on the app/system classloader (`LoaderUtil.verifyNotInTargetCl`), so a
+  premain transformer sees them. It is **fragile / loader-version-specific** (0.19.3's
+  `init()` body shifts across versions).
+- **Classloader identity — real hazard, mitigation verified.** `KnotClassLoader` is
+  isolated (child-first, `parent=DummyClassLoader`); LB classes on the agent loader are
+  invisible to Knot. Fix: `KnotClassDelegate.addCodeSource(Path)` → `addUrlFwd(URL)` is
+  `synchronized` with no frozen guard, callable late — add LB's jar this way.
+- **Kotlin runtime — the plan MISSED this (real gap).** LB is Kotlin and `fabric.mod.json`
+  hard-depends on `fabric-language-kotlin` (verified). On a live install *without* FLK,
+  LB won't link. The agent must inject **kotlin-stdlib + fabric-language-kotlin** onto Knot
+  alongside LB's jar.
+
+**NeoForge — basically a non-starter for *non-mod* injection (reasoned, NOT jar-verified).**
+ModLauncher builds an immutable JPMS `ModuleLayer` from `ServiceLoader`-discovered transform
+services (incl. `MixinServiceModLauncher`) and seals it before `Launcher.run()`; a premain
+agent runs before that with no post-seal API to add a module/transformation service.
+Realistic outcomes: become a discovered `ITransformationService` (defeats "non-mod"), or
+don't inject. **Needs its own jar-level spike before this is a finding.**
+
+**Is it worth it vs the native mod? Weak.** The agent must reproduce at runtime, reflectively,
+everything `fabric.mod.json` declares — classpath insert (LB jar **+ Kotlin + FLK**), both
+mixin configs via `addConfiguration`, AW via ClassTweaker — through a version-brittle Knot
+rewrite. It buys **only** "not a discovered mod / not in the mod list." Both loaders already
+boot LB in-world via the mod path. **Gate 0: confirm with scorpion that "attach without
+installing" is a hard requirement** before any build; otherwise the mod path dominates.
+
+### Revised gate — trimmed kill-shot (supersedes the full spike)
+
+1. **Gate 0 (free): confirm the use case with scorpion.** If "must not be a discovered mod"
+   isn't required, stop — use the mod path on loaders.
+2. **One-assertion Fabric spike:** the only genuinely-uncertain empirical bit is whether a
+   late `addConfiguration` at PreLaunch actually applies to `Minecraft.<init>` on a live Knot
+   (println fires) without the first-transformed-class race. Prove *that single assertion*;
+   add the AW/ClassTweaker sub-check only if it's green.
+3. **NeoForge** gets its own separate jar-level spike, only if Fabric is green and scorpion
+   still wants it.
+
 ## Milestones (once greenlit — not now)
 
 SPIKE (Fabric: one mixin applies via defer) → confirm use case → Fabric back-end (classpath
