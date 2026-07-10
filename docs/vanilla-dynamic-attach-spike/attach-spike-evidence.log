@@ -1,0 +1,20 @@
+# Dynamic-attach (no-flag injection) spike — evidence (2026-07-10)
+
+## Case A wall 1: attach to a RUNNING MC fails — MC drops SIGQUIT
+  MC at menu SigCgt=0x16003  -> SIGQUIT(bit2,0x4) NOT caught
+  plain JVM (Sleeper) SigCgt=0x101005ccf -> SIGQUIT caught (attach works)
+  VirtualMachine.attach(mcPid) -> AttachNotSupportedException: state is not ready to participate in attach handshake
+
+## Case A wall 2: retransformClasses forbids schema changes (demonstrated on a plain JVM)
+[ATTACH][A] target Sleeper loaded=true
+[ATTACH][A] (a) BODY-ONLY retransform: SUCCESS
+[ATTACH][A] (b) SCHEMA-CHANGE retransform: FAILED -> java.lang.UnsupportedOperationException: class redefinition failed: attempted to add a method
+
+## Case B: EARLY attach at boot works (SIGQUIT caught early: SigCgt=0x16007)
+[WARM] polling for MC JVM…
+[WARM] MC pid 417498 detected at +1009ms; racing attach
+[WARM] ATTACHED + loadAgent OK at +1424ms (attempt 0)
+[ATTACH] agentmain args=caseB:net/minecraft/client/gui/screens/TitleScreen retransformSupported=true redefineSupported=true
+[ATTACH][B] registering transformer for net/minecraft/client/gui/screens/TitleScreen (was it already loaded? false)
+[ATTACH][B] transformer armed before net/minecraft/client/gui/screens/TitleScreen loaded — waiting for it to load
+[15:02:23] [Render thread/INFO]: [STDOUT]: [ATTACH][B] >>> transformed net/minecraft/client/gui/screens/TitleScreen AS IT LOADED (20937 -> 21234 bytes, schema change accepted on-load) <<<
