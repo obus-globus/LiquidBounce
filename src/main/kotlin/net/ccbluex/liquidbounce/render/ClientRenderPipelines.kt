@@ -28,12 +28,14 @@ import com.mojang.blaze3d.pipeline.ColorTargetState
 import com.mojang.blaze3d.pipeline.DepthStencilState
 import com.mojang.blaze3d.pipeline.RenderPipeline
 import com.mojang.blaze3d.platform.CompareOp
+import com.mojang.blaze3d.shaders.ShaderSource
 import com.mojang.blaze3d.vertex.DefaultVertexFormat
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
 import net.ccbluex.fastutil.fastIterator
 import net.ccbluex.liquidbounce.LiquidBounce
 import net.ccbluex.liquidbounce.utils.client.gpuDevice
 import net.ccbluex.liquidbounce.utils.client.logger
+import net.ccbluex.liquidbounce.utils.client.mc
 import net.ccbluex.liquidbounce.utils.kotlin.optional
 import net.minecraft.client.renderer.BindGroupLayouts
 import net.minecraft.client.renderer.RenderPipelines
@@ -42,6 +44,9 @@ import net.minecraft.resources.Identifier
 object ClientRenderPipelines {
 
     private val renderPipelines = Object2ObjectOpenHashMap<Identifier, RenderPipeline>()
+
+    @Volatile
+    private var precompiled = false
 
     /**
      * Blend mode for JCEF compatible blending.
@@ -304,7 +309,6 @@ object ClientRenderPipelines {
      */
     private val OutlineQuads = newPipeline("outline_quads") {
         withSnippet(RenderPipelines.DEBUG_FILLED_SNIPPET)
-        withSnippet(RenderPipelines.GLOBALS_SNIPPET)
         withVertexShader(ClientShaders.Vertex.PosColorRelativeToCamera)
         withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR)
         withPrimitiveTopology(PrimitiveTopology.QUADS)
@@ -315,7 +319,6 @@ object ClientRenderPipelines {
 
     private val OutlineQuadsNoColor = newPipeline("outline_quads_no_color") {
         withSnippet(RenderPipelines.DEBUG_FILLED_SNIPPET)
-        withSnippet(RenderPipelines.GLOBALS_SNIPPET)
         withVertexShader(ClientShaders.Vertex.PosRelativeToCamera)
         withFragmentShader(ClientShaders.Fragment.PosRelativeToCamera)
         withVertexBinding(0, DefaultVertexFormat.POSITION)
@@ -460,6 +463,16 @@ object ClientRenderPipelines {
     }
 
     /**
+     * Falls back to vanilla's shader manager for the vanilla `core` shaders our pipelines reference:
+     * [ClientShaders] only knows LiquidBounce's own shaders, and after a
+     * [com.mojang.blaze3d.systems.GpuDevice.clearPipelineCache] reset (see [ensureCompiled])
+     * the vanilla modules are no longer cached on the device either.
+     */
+    private val shaderSource = ShaderSource { id, type ->
+        ClientShaders[id, type] ?: mc.shaderManager.getShader(id, type)
+    }
+
+    /**
      * Precompile
      */
     fun precompile() {
@@ -467,9 +480,34 @@ object ClientRenderPipelines {
         GUI
 
         renderPipelines.fastIterator().forEach { (_, pipeline) ->
-            gpuDevice.precompilePipeline(pipeline, ClientShaders)
+            gpuDevice.precompilePipeline(pipeline, shaderSource)
         }
         logger.info("Loaded ${renderPipelines.size} Render Pipelines.")
+        precompiled = true
+    }
+
+    /**
+     * Compiles all pipelines on first use if [precompile] has not run yet. Its usual trigger
+     * (`ShaderManager.apply`) fires during startup resource reload, which has already happened
+     * when LiquidBounce is injected into a running game — without this guard the pipelines
+     * lazy-compile with the device's default shader source, which lacks [ClientShaders].
+     *
+     * Must be called on the render thread. Once compiled, this is a single volatile read.
+     */
+    fun ensureCompiled() {
+        if (precompiled) return
+
+        precompile()
+
+        // If a draw already lazy-compiled a pipeline before we got here, the device cached the
+        // failed compile and the precompile above was silently ignored for it. Detect that on
+        // the pipeline used first (the JCEF browser quad) and reset the device caches — vanilla
+        // pipelines simply recompile lazily from the default source afterwards.
+        if (!gpuDevice.precompilePipeline(JCEF.BGRA_BLURRED_TEXTURE, shaderSource).isValid) {
+            logger.warn("Render pipelines were lazily compiled before precompile; resetting pipeline cache.")
+            gpuDevice.clearPipelineCache()
+            precompile()
+        }
     }
 
 }
