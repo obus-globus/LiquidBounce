@@ -1,5 +1,6 @@
 import org.objectweb.asm.*;
 import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree.analysis.*;
 import java.util.*;
 
 /**
@@ -92,6 +93,7 @@ public class RetransformConverter {
         addSidecarClinit(S);
         addGetState(S);
         for (FieldNode f : addedFields) if ((f.access & Opcodes.ACC_STATIC) == 0) addFieldAccessors(S, f);
+        S.methods.add(buildInstanceStateInitializer(X));
         // relocate the added methods as sidecar statics (body rewritten); an added <clinit> (static @Unique field
         // initializer the mixin merged into the target) is MERGED into the sidecar's own <clinit>, not relocated
         // as an (illegal) h$<clinit>.
@@ -266,10 +268,37 @@ public class RetransformConverter {
         in.add(new VarInsnNode(Opcodes.ALOAD, 1));
         in.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/util/Map", "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true));
         in.add(new InsnNode(Opcodes.POP));
+        in.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        in.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "initState", "("+targetDesc+"L"+stateName+";)V", false));
         in.add(notNull);
         in.add(new VarInsnNode(Opcodes.ALOAD, 1));
         in.add(new InsnNode(Opcodes.ARETURN));
         g.maxStack = 3; g.maxLocals = 2; S.methods.add(g);
+    }
+
+    /** Replay mixin-added instance-field initializer statements for objects whose vanilla constructor ran before
+     *  attachment. Mixin appends these assignments to every transformed constructor; a compact straight-line
+     *  assignment is copied into initState(Target,State) and runs once when sidecar state is first materialized. */
+    MethodNode buildInstanceStateInitializer(ClassNode transformed) {
+        MethodNode out=new MethodNode(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"initState","("+targetDesc+"L"+stateName+";)V",null,null);
+        Set<String> done=new HashSet<>();
+        for(MethodNode ctor:transformed.methods){if(!ctor.name.equals("<init>")||ctor.instructions==null)continue;
+            try{
+                Analyzer<BasicValue> analyzer=new Analyzer<>(new BasicInterpreter());Frame<BasicValue>[] frames=analyzer.analyze(transformed.name,ctor);AbstractInsnNode[] ins=ctor.instructions.toArray();
+                for(int i=0;i<ins.length;i++){if(!(ins[i] instanceof FieldInsnNode f)||f.getOpcode()!=Opcodes.PUTFIELD||!f.owner.equals(targetInternal)||!addedInstanceFields.contains(f.name)||!done.add(f.name+" "+f.desc))continue;
+                    Frame<BasicValue> at=frames[i];if(at==null||at.getStackSize()<2){done.remove(f.name+" "+f.desc);continue;}int base=at.getStackSize()-2,start=-1;
+                    for(int s=i-1;s>=0;s--)if(ins[s].getOpcode()>=0&&frames[s]!=null&&frames[s].getStackSize()==base){start=s;break;}
+                    if(start<0||!(ins[start] instanceof VarInsnNode recv)||recv.getOpcode()!=Opcodes.ALOAD||recv.var!=0){done.remove(f.name+" "+f.desc);continue;}
+                    boolean safe=true;for(int s=start+1;s<i;s++){AbstractInsnNode p=ins[s];if(p instanceof JumpInsnNode||p instanceof TableSwitchInsnNode||p instanceof LookupSwitchInsnNode||p instanceof IincInsnNode||(p instanceof VarInsnNode v&&v.var!=0)){safe=false;break;}}
+                    if(!safe){done.remove(f.name+" "+f.desc);continue;}
+                    out.instructions.add(new VarInsnNode(Opcodes.ALOAD,1));Map<LabelNode,LabelNode> labels=new HashMap<>();
+                    for(int s=start+1;s<i;s++)if(ins[s].getOpcode()>=0)out.instructions.add(ins[s].clone(labels));
+                    out.instructions.add(new FieldInsnNode(Opcodes.PUTFIELD,stateName,f.name,f.desc));
+                }
+            }catch(Throwable ignored){}
+        }
+        out.instructions.add(new InsnNode(Opcodes.RETURN));rewriteRefs(out,true);out.maxLocals=2;out.maxStack=8;return out;
     }
     void addFieldAccessors(ClassNode S, FieldNode f) {
         Type t = Type.getType(f.desc);
@@ -458,6 +487,16 @@ public class RetransformConverter {
                 if (isStatic) reflectStaticMethods.add(key);
                 String nd = isStatic ? mi.desc : "(" + targetDesc + mi.desc.substring(1);
                 m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "rmi$" + invokerId(mi.name, mi.desc), nd, false));
+            } else if (inSidecar && p instanceof MethodInsnNode mi && illegalSidecarMethod(sidecar,mi.owner,mi.name,mi.desc)) {
+                // Relocation also loses nestmate/subclass privileges for methods and constructors declared outside
+                // the target package. Lower them through the same cached reflection runtime used for late AW access.
+                if (mi.getOpcode()==Opcodes.INVOKESPECIAL && mi.name.equals("<init>")) {
+                    AbstractInsnNode nw=mi.getPrevious();
+                    while(nw!=null&&!(nw instanceof TypeInsnNode tn&&tn.getOpcode()==Opcodes.NEW&&tn.desc.equals(mi.owner)))nw=nw.getPrevious();
+                    if(nw!=null&&nw.getNext()!=null&&nw.getNext().getOpcode()==Opcodes.DUP){AbstractInsnNode dup=nw.getNext();m.instructions.remove(nw);m.instructions.remove(dup);rewriteAwCtorInline(m,mi);}
+                } else if (!mi.name.startsWith("<") && (mi.getOpcode()==Opcodes.INVOKEVIRTUAL||mi.getOpcode()==Opcodes.INVOKESTATIC||mi.getOpcode()==Opcodes.INVOKESPECIAL)) {
+                    rewriteAwMethodInline(m,mi);
+                }
             } else if (p instanceof InvokeDynamicInsnNode idn) {
                 // A: rewrite bootstrap Handle args that point at a relocated target method -> sidecar static.
                 // The lambda's captured `this` (target) becomes the static's param0 (LambdaMetafactory adapts
@@ -843,6 +882,21 @@ public class RetransformConverter {
     static boolean nonPublicField(String owner,String name,String desc){String key=owner+'\0'+name+' '+desc;Boolean cached=NON_PUBLIC_FIELDS.get(key);if(cached!=null)return cached;
         boolean result=false;String c=owner;int guard=0;while(c!=null&&!c.equals("java/lang/Object")&&guard++<64){try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)break;ClassReader cr=new ClassReader(b);ClassNode n=new ClassNode();cr.accept(n,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);boolean found=false;for(FieldNode f:n.fields)if(f.name.equals(name)&&f.desc.equals(desc)){result=(f.access&Opcodes.ACC_PUBLIC)==0;found=true;break;}if(found)break;c=cr.getSuperName();}catch(Throwable t){break;}}
         Boolean raced=NON_PUBLIC_FIELDS.putIfAbsent(key,result);return raced==null?result:raced;}
+    record MethodAccess(String owner,int ownerAccess,int memberAccess){}
+    static final java.util.concurrent.ConcurrentHashMap<String,Optional<MethodAccess>> METHOD_ACCESS = new java.util.concurrent.ConcurrentHashMap<>();
+    static boolean illegalSidecarMethod(String caller,String owner,String name,String desc){
+        Optional<MethodAccess> found=METHOD_ACCESS.computeIfAbsent(owner+'\0'+name+desc,k->resolveMethodAccess(owner,name,desc));
+        if(found.isEmpty())return false;MethodAccess a=found.get();
+        if((a.memberAccess&Opcodes.ACC_PRIVATE)!=0)return true;
+        if((a.ownerAccess&Opcodes.ACC_PUBLIC)!=0&&(a.memberAccess&Opcodes.ACC_PUBLIC)!=0)return false;
+        return !pkg(caller).equals(pkg(a.owner));
+    }
+    static Optional<MethodAccess> resolveMethodAccess(String owner,String name,String desc){
+        ArrayDeque<String> q=new ArrayDeque<>();HashSet<String> seen=new HashSet<>();q.add(owner);
+        while(!q.isEmpty()){String c=q.removeFirst();if(!seen.add(c))continue;try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)continue;ClassNode n=new ClassNode();new ClassReader(b).accept(n,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);for(MethodNode m:n.methods)if(m.name.equals(name)&&m.desc.equals(desc))return Optional.of(new MethodAccess(c,n.access,m.access));if(n.superName!=null)q.addLast(n.superName);q.addAll(n.interfaces);}catch(Throwable ignored){}}
+        return Optional.empty();
+    }
+    static String pkg(String n){int i=n.lastIndexOf('/');return i<0?"":n.substring(0,i);}
     static String[] meta(String cn) {
         String[] m = META.get(cn); if (m != null) return m;
         try {

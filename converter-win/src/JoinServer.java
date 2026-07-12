@@ -10,6 +10,10 @@ public final class JoinServer {
         Object minecraft = mcClass.getMethod("getInstance").invoke(null);
         Runnable join = () -> {
             try {
+                // A previous late-bootstrap timeout may intentionally leave the normal ConnectScreen gate closed.
+                // This explicit test helper is itself the user's retry request, so discard any stale deferred call.
+                try { Class.forName("lbrt.JoinGate", false, sys).getMethod("cancelAndOpen").invoke(null); }
+                catch (ClassNotFoundException ignored) { }
                 Class<?> screenClass = Class.forName("net.minecraft.client.gui.screens.Screen", false, sys);
                 Class<?> titleClass = Class.forName("net.minecraft.client.gui.screens.TitleScreen", false, sys);
                 Object parent = titleClass.getConstructor().newInstance();

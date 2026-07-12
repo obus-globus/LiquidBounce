@@ -108,7 +108,21 @@ if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'jar (openinventory) failed' }
 Pop-Location
 Write-Host '[build] openinventory.jar OK'
 
-# --- 6. guimsgprobe.jar -----------------------------------------------------------------------------------
+# --- 6. sidecar-access-audit.jar --------------------------------------------------------------------------
+$SaDir = Join-Path $Repo 'build\sidecar-access-audit'
+New-Item -ItemType Directory -Force $SaDir | Out-Null
+& "$Jdk\javac.exe" --release 25 -cp $FullJar -d $SaDir (Join-Path $Src 'SidecarAccessAudit.java')
+if ($LASTEXITCODE -ne 0) { throw 'javac (SidecarAccessAudit) failed' }
+@'
+Agent-Class: SidecarAccessAudit
+'@ | Set-Content -Path (Join-Path $SaDir 'manifest.txt') -Encoding ascii
+Push-Location $SaDir
+& "$Jdk\jar.exe" cfm sidecar-access-audit.jar manifest.txt SidecarAccessAudit.class 'SidecarAccessAudit$Info.class' 'SidecarAccessAudit$Issue.class'
+if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'jar (SidecarAccessAudit) failed' }
+Pop-Location
+Write-Host '[build] sidecar-access-audit.jar OK'
+
+# --- 7. guimsgprobe.jar -----------------------------------------------------------------------------------
 $PrDir = Join-Path $Repo 'build\guimsgprobe'
 New-Item -ItemType Directory -Force $PrDir | Out-Null
 & "$Jdk\javac.exe" --release 25 -d $PrDir (Join-Path $Src 'GuiMsgProbe.java')
