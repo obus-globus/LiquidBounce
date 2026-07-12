@@ -19,6 +19,7 @@ public class FullInjectAgent {
     static final boolean DEBUG = Boolean.getBoolean("lb.agent.debug");
     static IMixinTransformer tr; static MixinEnvironment env; static Method defineClass5;
     static final Set<String> definedSynth = ConcurrentHashMap.newKeySet();
+    static final Set<String> definingSynth = ConcurrentHashMap.newKeySet();
     static final Map<String,Conv> convMap = new ConcurrentHashMap<>();             // internal -> conversion holder
     static final Map<String,List<String[]>> ifaceMap = new HashMap<>();            // iface -> all [target, sidecar]
     static final Set<String> targetSet = new HashSet<>();                          // internal names of mixin targets
@@ -252,13 +253,31 @@ public class FullInjectAgent {
             if (m.contains("duplicate")) return true;                         // already defined -> fine
             System.out.println("[FULL] DEFINE-FAIL "+dotted+" -> "+c.getClass().getSimpleName()+": "+c.getMessage());
             return false; } }
-    static synchronized boolean defineSynthetics(byte[] cb, ProtectionDomain pd){boolean ok=true;for(String in:scanSyn(cb)){String d=in.replace('/','.');
-        try{try{Class.forName(d,false,SYS);definedSynth.add(d);continue;}catch(ClassNotFoundException x){}
-            if(!definedSynth.add(d)){ok=false;continue;}
-            byte[] sb=tr.generateClass(env,d);boolean one=sb!=null&&defineSynthetics(sb,pd)&&define(d,sb,d.startsWith("org.spongepowered.")?null:pd);
-            if(!one)definedSynth.remove(d);ok&=one;
-        }catch(Throwable t){definedSynth.remove(d);ok=false;}}return ok;}
-    static List<String> scanSyn(byte[] b){ LinkedHashSet<String> o=new LinkedHashSet<>(); try{ ClassReader cr=new ClassReader(b); char[] bu=new char[cr.getMaxStringLength()]; for(int i=1;i<cr.getItemCount();i++){int off=cr.getItem(i); if(off==0||off-1<0)continue; if((b[off-1]&0xff)!=7)continue; try{String n=cr.readUTF8(off,bu); if(n!=null&&(n.startsWith("org/spongepowered/asm/synthetic/")||n.contains("$Anonymous$")))o.add(n);}catch(Throwable x){}}}catch(Throwable x){} return new ArrayList<>(o); }
+    static synchronized boolean defineSynthetics(byte[] cb, ProtectionDomain pd){
+        boolean ok=true;
+        for(String in:scanSyn(cb)){
+            String d=in.replace('/','.');
+            try{
+                try{Class.forName(d,false,SYS);definedSynth.add(d);continue;}catch(ClassNotFoundException expected){}
+                if(definedSynth.contains(d)||definingSynth.contains(d))continue;
+                definingSynth.add(d);boolean one=false;
+                try{
+                    byte[] sb=tr.generateClass(env,d);
+                    if(sb==null)syntheticError("SYNTHETIC_GENERATE_FAILURE",d,"Mixin transformer returned no bytes");
+                    else if(!defineSynthetics(sb,pd))syntheticError("SYNTHETIC_DEPENDENCY_FAILURE",d,"A generated synthetic dependency failed");
+                    else if(!define(d,sb,d.startsWith("org.spongepowered.")?null:pd))syntheticError("SYNTHETIC_DEFINE_FAILURE",d,"Generated class could not be defined");
+                    else{definedSynth.add(d);one=true;}
+                }finally{definingSynth.remove(d);}
+                ok&=one;
+            }catch(Throwable t){definingSynth.remove(d);syntheticError("SYNTHETIC_PIPELINE_FAILURE",d,rootMsg(t));ok=false;}
+        }
+        return ok;
+    }
+    static void syntheticError(String code,String dotted,String message){
+        System.out.println("[FULL] SYNTH-FAIL "+dotted+" -> "+message);
+        LateAttachVerifier.error(code,dotted.replace('.','/'),"synthetic",message);
+    }
+    static List<String> scanSyn(byte[] b){ LinkedHashSet<String> o=new LinkedHashSet<>(); try{ ClassReader cr=new ClassReader(b);String self=cr.getClassName(); char[] bu=new char[cr.getMaxStringLength()]; for(int i=1;i<cr.getItemCount();i++){int off=cr.getItem(i); if(off==0||off-1<0)continue; if((b[off-1]&0xff)!=7)continue; try{String n=cr.readUTF8(off,bu); if(n!=null&&!n.equals(self)&&(n.startsWith("org/spongepowered/asm/synthetic/")||n.contains("$Anonymous$")))o.add(n);}catch(Throwable x){}}}catch(Throwable x){} return new ArrayList<>(o); }
     /** Exact, idempotent registry-state transaction. Originally-unfrozen registries stay unfrozen. */
     static final class RegistryThawSession implements AutoCloseable {
         final java.lang.reflect.Field frozen;
