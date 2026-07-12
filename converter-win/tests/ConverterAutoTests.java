@@ -22,7 +22,7 @@ public final class ConverterAutoTests {
     public static class GateTarget { public static int calls; public static void startConnecting(String host,int port){
         List<String> values;if(port>0)values=new ArrayList<>();else values=new LinkedList<>();values.add(host);calls+=values.size();} }
     public static class AwTarget {
-        private int number; private AwTarget(int number){this.number=number;}
+        private final int number; private AwTarget(int number){this.number=number;}
         private static long combine(long x,double y){return x+(long)y;}
         private int add(int x){return number+x;}
     }
@@ -36,6 +36,7 @@ public final class ConverterAutoTests {
         testAwInlineRewrite();
         testJoinGateRewrite();
         testSchemaGate();
+        testConverterRestoresOriginalSchema();
         System.out.println("[AUTO-TEST] all converter automation fixtures passed");
     }
 
@@ -137,6 +138,30 @@ public final class ConverterAutoTests {
         no(LateAttachVerifier.verifyRetransform("fixture/Schema",original,changed));
     }
 
+    static void testConverterRestoresOriginalSchema() throws Exception {
+        String owner="fixture/RestoredSchema";
+        byte[] original=mutableSchemaFixture(owner,true,false,1);
+        byte[] mixed=mutableSchemaFixture(owner,false,true,2);
+        byte[] converted=RetransformConverter.convert(owner,original,mixed).target;
+        yes(LateAttachVerifier.verifyRetransform(owner,original,converted));
+        ClassNode c=new ClassNode();new ClassReader(converted).accept(c,0);
+        eq(List.of("<init>","first","second"),c.methods.stream().map(m->m.name).toList());
+        eq(Opcodes.ACC_PRIVATE|Opcodes.ACC_FINAL,c.fields.get(0).access);
+        MethodNode first=c.methods.stream().filter(m->m.name.equals("first")).findFirst().orElseThrow();
+        AbstractInsnNode p=first.instructions.getFirst();while(p!=null&&p.getOpcode()<0)p=p.getNext();
+        eq(Opcodes.ICONST_2,p.getOpcode());
+        Class<?> k=new Loader().define(owner.replace('/','.'),converted);
+        eq(2,k.getMethod("first").invoke(k.getConstructor().newInstance()));
+
+        byte[] rebased=RetransformConverter.rebase(mixed,original);
+        yes(LateAttachVerifier.verifyRetransform(owner,original,rebased));
+        ClassNode r=new ClassNode();new ClassReader(rebased).accept(r,0);
+        eq(List.of("<init>","first","second"),r.methods.stream().map(m->m.name).toList());
+        eq(Opcodes.ACC_PRIVATE|Opcodes.ACC_FINAL,r.fields.get(0).access);
+        Class<?> rk=new Loader().define(owner.replace('/','.'),rebased);
+        eq(2,rk.getMethod("first").invoke(rk.getConstructor().newInstance()));
+    }
+
     static byte[] callerFixture(String owner,String iface){ClassWriter w=new ClassWriter(ClassWriter.COMPUTE_FRAMES|ClassWriter.COMPUTE_MAXS);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"call","(Ljava/lang/Object;)Ljava/lang/String;",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.CHECKCAST,iface);m.visitMethodInsn(Opcodes.INVOKEINTERFACE,iface,"value","()Ljava/lang/String;",true);m.visitInsn(Opcodes.ARETURN);m.visitMaxs(0,0);m.visitEnd();m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"isDuck","(Ljava/lang/Object;)Z",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.INSTANCEOF,iface);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(0,0);m.visitEnd();m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"callWide","(Ljava/lang/Object;JD)I",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.CHECKCAST,iface);m.visitVarInsn(Opcodes.LLOAD,1);m.visitVarInsn(Opcodes.DLOAD,3);m.visitMethodInsn(Opcodes.INVOKEINTERFACE,iface,"wide","(JD)I",true);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(0,0);m.visitEnd();w.visitEnd();return w.toByteArray();}
     static byte[] accessorFixture(String owner,String target){ClassWriter w=new ClassWriter(ClassWriter.COMPUTE_FRAMES|ClassWriter.COMPUTE_MAXS);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT|Opcodes.ACC_INTERFACE,owner,null,"java/lang/Object",null);addMixin(w,target);addAccessorStub(w,"getSecret","()Ljava/lang/String;","SECRET");addAccessorStub(w,"getNumber","()I","NUMBER");addAccessorStub(w,"setNumber","(I)V","NUMBER");MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"createAccessorTarget","(Ljava/lang/String;)L"+target+";",null,null);m.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Invoker;",false).visitEnd();stub(m);w.visitEnd();return w.toByteArray();}
     static byte[] abstractAccessorFixture(String owner,String target){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT|Opcodes.ACC_INTERFACE,owner,null,"java/lang/Object",null);addMixin(w,target);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT,"getValue","()Ljava/lang/String;",null,null);m.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Accessor;",false).visitEnd();m.visitEnd();w.visitEnd();return w.toByteArray();}
@@ -145,6 +170,8 @@ public final class ConverterAutoTests {
     static void addAccessorStub(ClassWriter w,String name,String desc,String field){MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,name,desc,null,null);AnnotationVisitor a=m.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Accessor;",false);a.visit("value",field);a.visitEnd();stub(m);}
     static void stub(MethodVisitor m){m.visitCode();m.visitTypeInsn(Opcodes.NEW,"java/lang/AssertionError");m.visitInsn(Opcodes.DUP);m.visitMethodInsn(Opcodes.INVOKESPECIAL,"java/lang/AssertionError","<init>","()V",false);m.visitInsn(Opcodes.ATHROW);m.visitMaxs(0,0);m.visitEnd();}
     static byte[] schemaFixture(String owner,boolean extra){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);w.visitField(Opcodes.ACC_PRIVATE,"x","I",null,null).visitEnd();if(extra)w.visitField(Opcodes.ACC_PRIVATE,"y","I",null,null).visitEnd();MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC,"value","()I",null,null);m.visitCode();m.visitInsn(Opcodes.ICONST_1);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(1,1);m.visitEnd();w.visitEnd();return w.toByteArray();}
+    static byte[] mutableSchemaFixture(String owner,boolean isFinal,boolean reverseMethods,int value){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);w.visitField(Opcodes.ACC_PRIVATE|(isFinal?Opcodes.ACC_FINAL:0),"state","I",null,null).visitEnd();MethodVisitor c=w.visitMethod(Opcodes.ACC_PUBLIC,"<init>","()V",null,null);c.visitCode();c.visitVarInsn(Opcodes.ALOAD,0);c.visitMethodInsn(Opcodes.INVOKESPECIAL,"java/lang/Object","<init>","()V",false);c.visitInsn(Opcodes.RETURN);c.visitMaxs(1,1);c.visitEnd();if(reverseMethods){constantMethod(w,"second",3);constantMethod(w,"first",value);}else{constantMethod(w,"first",value);constantMethod(w,"second",3);}w.visitEnd();return w.toByteArray();}
+    static void constantMethod(ClassWriter w,String name,int value){MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC,name,"()I",null,null);m.visitCode();m.visitInsn(Opcodes.ICONST_0+value);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(1,1);m.visitEnd();}
 
     static String internal(Class<?> c){return c.getName().replace('.','/');}
     static byte[] bytesOf(Class<?> c)throws Exception{try(InputStream in=c.getClassLoader().getResourceAsStream(internal(c)+".class")){return Objects.requireNonNull(in).readAllBytes();}}

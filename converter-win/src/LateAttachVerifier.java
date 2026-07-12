@@ -77,7 +77,7 @@ public final class LateAttachVerifier {
         static Schema read(byte[] b) {
             ClassNode c = new ClassNode(); new ClassReader(b).accept(c, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
             Schema s = new Schema();
-            s.header = c.name + "|" + c.access + "|" + c.superName;
+            s.header = c.version + "|" + c.name + "|" + c.access + "|" + c.superName;
             s.interfaces = List.copyOf(c.interfaces);
             s.fields = new ArrayList<>(); for(FieldNode f:c.fields) s.fields.add(f.name+"|"+f.desc+"|"+f.access);
             s.methods = new ArrayList<>(); for(MethodNode m:c.methods) s.methods.add(m.name+"|"+m.desc+"|"+m.access);
