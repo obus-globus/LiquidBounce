@@ -12,8 +12,7 @@ import vspike.VSpikeService;
 import lbrt.InjectionLogger;
 
 /** Vanilla late-attach platform: MC + staged LB live on the SYSTEM classloader, and the agent stands up its OWN
- *  standalone Sponge Mixin service (VSpikeService) and applies LB's AccessWidener itself. Lifted verbatim from the
- *  proven FullInjectAgent code; behavior is identical. */
+ *  standalone Sponge Mixin service (VSpikeService) and applies LB's AccessWidener itself. */
 final class VanillaPlatform implements LoaderPlatform {
     private final ClassLoader sys = ClassLoader.getSystemClassLoader();
     private final Method defineClass5;                                        // reflective 5-arg ClassLoader.defineClass

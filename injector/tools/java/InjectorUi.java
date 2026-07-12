@@ -443,11 +443,11 @@ public final class InjectorUi extends JFrame {
     private static String defaultAgentPath() {
         try {
             Path classes = Path.of(InjectorUi.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-            Path converterWin = classes.getParent();
-            if (converterWin != null && converterWin.getParent() != null)
-                return converterWin.getParent().resolve("build/full-agent-schemafix/full-agent.jar").toString();
+            Path buildDir = classes.getParent();
+            if (buildDir != null && buildDir.getParent() != null)
+                return buildDir.getParent().resolve("build/injector/liquidbounce-injector-agent.jar").toString();
         } catch (URISyntaxException | RuntimeException ignored) { }
-        return "build/full-agent-schemafix/full-agent.jar";
+        return "build/injector/liquidbounce-injector-agent.jar";
     }
 
     public static void main(String[] args) {

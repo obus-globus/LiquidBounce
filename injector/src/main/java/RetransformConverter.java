@@ -55,10 +55,6 @@ public class RetransformConverter {
         this.stateName = sidecar + "$State";
     }
 
-    public static Result convert(String targetInternal, byte[] original, byte[] transformed) {
-        return new RetransformConverter(targetInternal).run(original, transformed);
-    }
-
     final Map<String,Integer> oFieldAcc = new HashMap<>();     // original field name -> access (for B: non-public => reflect)
     final Map<String,String> oFieldDesc = new HashMap<>();
     final LinkedHashSet<String> reflectFields = new LinkedHashSet<>();  // "name desc" of non-public target fields accessed
@@ -152,8 +148,7 @@ public class RetransformConverter {
         // emit sidecar + state as one combined verify pass isn't needed; caller defines both
         r.sidecar = write(S, null);
         r.notes.add("state class: " + stateName + " (" + addedInstanceFields.size() + " instance fields)");
-        // stash the state bytes on the result via a side channel: append as a second class is awkward; caller
-        // regenerates State from stateBytes below.
+        // state bytes returned via stateBytes()
         stateBytes = write(St, null);
         return r;
     }
@@ -263,7 +258,6 @@ public class RetransformConverter {
         InsnList in = g.instructions;
         in.add(new FieldInsnNode(Opcodes.GETSTATIC, sidecar, "STATE", "Ljava/util/Map;"));
         in.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        // computeIfAbsent with a lambda is complex in raw ASM; use get-or-create explicitly
         // State s = (State) STATE.get(self); if(s==null){ s=new State(); STATE.put(self,s);} return s;
         in.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/util/Map", "get", "(Ljava/lang/Object;)Ljava/lang/Object;", true));
         in.add(new TypeInsnNode(Opcodes.CHECKCAST, stateName));
@@ -377,7 +371,7 @@ public class RetransformConverter {
         MethodNode s = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "h$" + m.name, newDesc, null,
             m.exceptions == null ? null : m.exceptions.toArray(new String[0]));
         s.instructions = m.instructions; s.tryCatchBlocks = m.tryCatchBlocks;
-        s.maxStack = m.maxStack; s.maxLocals = Math.max(m.maxLocals, isStatic ? m.maxLocals : m.maxLocals);
+        s.maxStack = m.maxStack; s.maxLocals = m.maxLocals;
         relocatedHandlerName.put(m.name + " " + m.desc, "h$" + m.name + "|" + newDesc);
         rewriteRefs(s, true);   // rewrite added-member refs inside the moved body
         return s;
@@ -875,8 +869,8 @@ public class RetransformConverter {
      *  components (GuiMessage: @Nullable on the `signature` component): RetransformClasses succeeds but the class's
      *  field metadata is corrupted -> intermittent `NoSuchFieldError: addedTime` at GuiMessage.<init>, and
      *  EXCEPTION_ACCESS_VIOLATION in Class.getDeclaredFields0 (JDK-8315575 family; reproduced LB-free with a pure
-     *  ASM round-trip, and clean with an identity clone and with this CP-preserving mode — see
-     *  converter-win\evidence\bug22\). NOTE: the basis MUST be the loaded original O, not the mixin output X
+     *  ASM round-trip, and clean with an identity clone and with this CP-preserving mode). NOTE: the basis MUST be
+     *  the loaded original O, not the mixin output X
      *  (Mixin's own ClassWriter already reordered X's pool). */
     static byte[] write(ClassNode n, byte[] orig) {
         ClassWriter w = orig != null

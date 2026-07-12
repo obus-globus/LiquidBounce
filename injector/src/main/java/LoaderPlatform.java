@@ -2,7 +2,7 @@ import java.io.File; import java.lang.instrument.Instrumentation; import java.ni
 
 /** Host-side abstraction over the loader-specific seams FullInjectAgent needs. Vanilla stands up its OWN Sponge Mixin
  *  service on the SYSTEM loader (VanillaPlatform); Fabric/NeoForge defer into the live Knot/FML service on their own
- *  loader (see converter-win/design/{FABRIC,NEOFORGE}-LATE-ATTACH.md §3). The transactional convert/verify/publish
+ *  loader. The transactional convert/verify/publish
  *  algorithm, the CFT, the kick, and RetransformConverter stay in FullInjectAgent and drive these primitives. */
 interface LoaderPlatform {
     /** Coupling #1: loader that holds net.minecraft.* and the staged LB bundle (vanilla: system; Fabric: Knot;

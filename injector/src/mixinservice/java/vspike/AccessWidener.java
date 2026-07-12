@@ -13,7 +13,6 @@ public class AccessWidener {
     private final Map<String,Set<String>> methodAccessible = new HashMap<>();
     private final Map<String,Set<String>> methodExtendable = new HashMap<>();
     private final Set<String> touchedClasses = new HashSet<>();
-    public int directives = 0;
 
     public AccessWidener(InputStream in) throws IOException {
         try (BufferedReader r = new BufferedReader(new InputStreamReader(in))) {
@@ -27,7 +26,6 @@ public class AccessWidener {
                 if (t.length < 3) continue;
                 String access = t[0], type = t[1], owner = t[2];
                 touchedClasses.add(owner);
-                directives++;
                 switch (type) {
                     case "class":
                         if (access.equals("accessible")) classAccessible.add(owner);

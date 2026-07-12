@@ -5,9 +5,9 @@ import java.io.*; import java.lang.instrument.Instrumentation; import java.lang.
 import java.net.URL; import java.nio.file.*; import java.security.*; import java.util.*; import java.util.jar.*;
 import lbrt.InjectionLogger;
 
-/** NeoForge (FML 11 / TransformingClassLoader) late-attach platform. See converter-win/design/NEOFORGE-LATE-ATTACH.md.
+/** NeoForge (FML 11 / TransformingClassLoader) late-attach platform.
  *
- *  Probe finding (converter-win/neoforge-probe/NfProbe): FML's Sponge Mixin (MixinService/Mixins/MixinTransformer) and
+ *  FML's Sponge Mixin (MixinService/Mixins/MixinTransformer) and
  *  FMLMixinService all live on the SYSTEM/App classloader — the SAME loader the dynamically-attached agent lands on —
  *  so the Mixin types share one identity with the agent (like Fabric's Option B, but here for free). We therefore use
  *  the typed Mixin API directly (VanillaPlatform-style) and reach FMLMixinService.getMixinTransformer()/processor

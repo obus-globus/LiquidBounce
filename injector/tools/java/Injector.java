@@ -1,14 +1,13 @@
-// Injector.java — tiny standalone dynamic-attach injector (Windows port of the lost /tmp/attach-spike/out/Injector).
-// Attaches to a running JVM by PID and loads a -javaagent jar into it via agentmain (VirtualMachine.loadAgent).
-// Used for every attach in the vanilla-agent work: full-agent.jar, enterworld.jar, opengui.jar, probe jars.
+// Injector.java — tiny standalone dynamic-attach injector.
+// Attaches to a running JVM by PID and loads an agent jar into it via agentmain (VirtualMachine.loadAgent).
+// Loads the injector agent jar into a running client JVM.
 //
 // It relies ONLY on the JDK's jdk.attach module (com.sun.tools.attach.VirtualMachine). No tools.jar, no extra deps.
 // A SEPARATE injector process is the correct model: jdk.attach.allowAttachSelf is NOT needed (never self-attach).
 //
 // ---------------------------------------------------------------------------------------------------------------
-// COMPILE (Windows, PowerShell or cmd) — any JDK 9+; the project uses JDK 25:
-//   javac -d out converter-win\Injector.java
-//     (jdk.attach is resolved automatically; no --add-modules needed for an unnamed-module program.)
+// COMPILE — any JDK 9+; the project uses JDK 25. Built by the injectorToolJar Gradle task (sources under
+//   injector/tools/java/). jdk.attach is resolved automatically; no --add-modules needed for an unnamed-module program.
 //
 // RUN:
 //   java -cp out Injector <pid> <C:\path\to\agent.jar> [agentArgs]
@@ -16,7 +15,7 @@
 //
 // NOTES:
 //   - On JDK 25 dynamic attach still works but prints:  "WARNING: A Java agent has been loaded dynamically ..."
-//     That warning is harmless (see docs/vanilla-agent-resume/04-environment-gotchas.md).
+//     That warning is harmless.
 //   - <pid> is the PID of the REAL Minecraft JVM (net.minecraft.client.main.Main), not a launcher/wrapper.
 //     Verify with VirtualMachine.list() — only real JVMs appear (a "timeout"/wrapper PID will NOT).
 //   - agentArgs is a single string handed to agentmain(String, Instrumentation). "" (empty) is fine for full-agent.

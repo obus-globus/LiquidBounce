@@ -90,5 +90,6 @@ still permits dynamic attach (it prints a harmless "agent loaded dynamically" wa
   (`feat/vanilla-agent`), including the CEF UI compositing on the converter path.
 - **NeoForge**: `NeoForgePlatform` implemented and exercised on the reference branch (LB initializes; 13 of 151
   targets are Fabric-only mixins that skip cleanly).
-- This branch reassembles that work onto current upstream `nextgen` (which carries a newer render subsystem); the
-  shader fix is re-derived and the target list re-checked against it — see the branch's verification notes.
+- This branch reassembles that work onto current upstream `nextgen`, which carries a newer render subsystem; the
+  shader fix has been re-derived against it and the module builds (`./gradlew injectorAgentJar`). A fresh
+  late-attach run against this newer base is the outstanding verification step.

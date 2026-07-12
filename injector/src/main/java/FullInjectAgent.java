@@ -3,9 +3,9 @@ import java.io.*; import java.lang.instrument.*; import java.lang.reflect.Method
 import java.nio.file.*; import java.security.ProtectionDomain; import java.util.*; import java.util.concurrent.*; import java.util.jar.*;
 import lbrt.InjectionLogger;
 
-/** MILESTONE 2/3: attach to a fully-running MC and inject FULL LiquidBounce. Uniform-convert every mixin
- *  target (already-loaded -> retransform; future -> on-load CFT returns target'); rewrite LB callers to
- *  sidecars; then manually kick LB's ClientStartEvent so it initializes on the already-running game. */
+/** Attach to a fully-running client and inject full LiquidBounce. Uniform-convert every mixin target
+ *  (already-loaded -> retransform; future -> on-load CFT returns target'); rewrite LB callers to sidecars;
+ *  then manually kick LB's ClientStartEvent so it initializes on the already-running game. */
 public class FullInjectAgent {
     static LoaderPlatform PLATFORM;                                               // loader-specific seams (vanilla/Fabric/NeoForge)
     static ClassLoader SYS;                                                       // == PLATFORM.targetLoader(); holds net.minecraft.* + staged LB
@@ -64,9 +64,6 @@ public class FullInjectAgent {
         // global relocation tables permit cross-target sidecar calls and therefore cannot be safely partially accepted.
         Map<String,Class<?>> loadedMap = new HashMap<>();
         for (Class<?> c : inst.getAllLoadedClasses()) loadedMap.put(c.getName().replace('.','/'), c);
-        // [BUG22-DIAG] was GuiMessage already loaded when we attached? (suspected intermittency factor)
-        if(DEBUG) System.out.println("[DBG22] GuiMessage loadedAtAttach="+loadedMap.containsKey("net/minecraft/client/multiplayer/chat/GuiMessage")
-                +" preLoaded="+preLoaded.contains("net/minecraft/client/multiplayer/chat/GuiMessage"));
         // Phase A: mixin-transform every target and collect the GLOBAL added-method table (so cross-target / base-class
         // @Unique calls route to the right sidecar during conversion).
         LinkedHashMap<String,byte[][]> txMap = new LinkedHashMap<>();
@@ -126,20 +123,14 @@ public class FullInjectAgent {
         inst.addTransformer(new ClassFileTransformer(){ public byte[] transform(ClassLoader l,String n,Class<?> c,ProtectionDomain p,byte[] b){
             if (n==null) return null;
             try {
-                // [BUG22-DIAG] log EVERY CFT sighting of GuiMessage (even if unconverted) with input byte identity
-                boolean g22 = n.equals("net/minecraft/client/multiplayer/chat/GuiMessage");
                 boolean connect = n.equals(JoinGateRewriter.CONNECT_SCREEN);
-                if (DEBUG && g22) System.out.println("[DBG22] CFT-in GuiMessage retransform="+(c!=null)+" conv="+convMap.containsKey(n)
-                        +" thread="+Thread.currentThread().getName()+" inBytes="+(b==null?-1:b.length)+" inSha="+sha(b)+" inFields="+fieldsOf(b));
                 Conv cv = convMap.get(n);
                 if (cv!=null) {
                     byte[] t = c==null ? cv.target : RetransformConverter.rebase(cv.target, b);
                     if(connect)t=JoinGateRewriter.rewrite(n,t);
                     if (c!=null && !LateAttachVerifier.verifyRetransform(n, b, t)) return null;
                     if(!cv.define(p))return null;
-                    boolean awch=false; if (c==null) { byte[] w=awApply(n,t); if(w!=null){ awch=true; t=w; } }
-                    if (DEBUG && g22) { System.out.println("[DBG22] CFT-out GuiMessage retransform="+(c!=null)+" aw="+awch+" outBytes="+t.length+" outSha="+sha(t)+" outFields="+fieldsOf(t));
-                        try { java.nio.file.Files.write(java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "guimsg-cft-"+(c!=null?"rt":"load")+"-"+System.nanoTime()+".class"), t); } catch(Throwable x){ System.out.println("[DBG22] dump fail "+x); } }
+                    if (c==null) { byte[] w=awApply(n,t); if(w!=null) t=w; }
                     return t; }
                 if (n.startsWith("net/ccbluex/")) {
                     byte[] rw = AccessorBridgeRewriter.rewrite(n, b);
@@ -401,8 +392,5 @@ public class FullInjectAgent {
         boolean resolved=resolver.getAsBoolean();Boolean raced=cache.putIfAbsent(key,resolved);
         return raced==null?resolved:raced;
     }
-    static String fieldsOf(byte[] b){ try { org.objectweb.asm.tree.ClassNode c=new org.objectweb.asm.tree.ClassNode(); new org.objectweb.asm.ClassReader(b).accept(c,0); StringBuilder s=new StringBuilder(); for(var f:c.fields) s.append(f.name).append(" "); return s.toString(); } catch(Throwable t){ return "ERR"; } }
-    /** [BUG22-DIAG] short sha-256 of class bytes for identity comparison across CFT events / dumps. */
-    static String sha(byte[] b){ try { if(b==null) return "null"; var md=java.security.MessageDigest.getInstance("SHA-256"); byte[] h=md.digest(b); StringBuilder s=new StringBuilder(); for(int i=0;i<6;i++) s.append(String.format("%02x",h[i])); return s.toString(); } catch(Throwable t){ return "ERR"; } }
     static String rootMsg(Throwable t){ while(t.getCause()!=null)t=t.getCause(); return t.getClass().getSimpleName()+": "+t.getMessage(); }
 }

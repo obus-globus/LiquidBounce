@@ -4,7 +4,7 @@ import java.io.*; import java.lang.instrument.Instrumentation; import java.lang.
 import java.nio.file.*; import java.security.*; import java.util.*; import java.util.jar.*;
 import lbrt.InjectionLogger;
 
-/** Fabric (Knot) late-attach platform. See converter-win/design/FABRIC-LATE-ATTACH.md + fabric-probe/PROBE-NOTES.md.
+/** Fabric (Knot) late-attach platform.
  *
  *  Cross-loader identity (Option B): the converter classes run on the SYSTEM loader (agent mechanism), but Sponge Mixin
  *  and ASM are on the process classpath and Knot delegates those packages to its parent, so they share one identity
