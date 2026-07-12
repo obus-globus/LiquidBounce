@@ -68,8 +68,8 @@ final class VanillaPlatform implements LoaderPlatform {
         awApply = aw.getClass().getMethod("apply", String.class, byte[].class);
     }
 
-    public IMixinTransformer transformer(){ return tr; }
-    public MixinEnvironment environment(){ return env; }
+    public byte[] transform(String dotted, byte[] originalO){ byte[] X = tr.transformClassBytes(dotted, dotted, originalO); return (X==null||java.util.Arrays.equals(X,originalO))?null:X; }
+    public byte[] generateClass(String dotted){ return tr.generateClass(env, dotted); }
     public Object accessWidener(){ return aw; }
     public boolean cftAppliesAw(){ return true; }
     public byte[] applyAw(String n, byte[] b){ try { return (byte[]) awApply.invoke(aw, n, b); } catch(Throwable t){ return null; } }
