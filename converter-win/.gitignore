@@ -1,0 +1,19 @@
+# Build outputs
+out/
+test-out/
+*.class
+*.jar
+
+# Staged Minecraft runtime (machine-specific, large)
+assets/
+saves/
+server-gen/
+mcef/
+
+# Compiled repro artifacts (sources are tracked)
+repro22/out/
+bug22-repro/out/
+bug22-repro/variants/
+
+# Generated attach manifests
+*-manifest.txt
