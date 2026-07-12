@@ -52,6 +52,14 @@ public final class LateAttachVerifier {
 
     public static boolean hasErrors() { return errorCount() > 0; }
     public static int errorCount() { int n=0; for(Issue i:ISSUES) if(i.severity.equals("ERROR")) n++; return n; }
+    /** Non-fatal codes: best-effort late-attach residue (an individual hook that could not be (re)transformed live,
+     *  e.g. ChatComponent's field-adding mixin, or an incidental on-load transform miss). These are recorded and
+     *  logged but must NOT abort injection or permanently gate multiplayer — the client keeps running minus that hook. */
+    private static final Set<String> SOFT_ERROR_CODES = Set.of(
+        "TARGET_RETRANSFORM_FAILURE", "CALLER_RETRANSFORM_FAILURE", "TRANSFORM_FAILURE");
+    /** True only if a FATAL error was recorded (any ERROR whose code is not in {@link #SOFT_ERROR_CODES}). Bootstrap/
+     *  activation/gate decisions use this so tolerable residue does not block init or lock the join gate closed. */
+    public static boolean hasFatalErrors() { for(Issue i:ISSUES) if(i.severity.equals("ERROR")&&!SOFT_ERROR_CODES.contains(i.code)) return true; return false; }
     private static int localErrors() { return LOCAL_ERRORS.get(); }
     public static List<Issue> issues() { return List.copyOf(ISSUES); }
 

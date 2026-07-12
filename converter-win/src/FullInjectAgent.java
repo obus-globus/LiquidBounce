@@ -203,7 +203,7 @@ public class FullInjectAgent {
             }
         }catch(Throwable e){LateAttachVerifier.error("JOIN_GATE_PREFLIGHT_FAILURE",JoinGateRewriter.CONNECT_SCREEN,"join-gate",rootMsg(e));}
         preflightLbClasses(lbBundle,awRes,gadded,gfield,ifaceMap);
-        if(LateAttachVerifier.hasErrors()){
+        if(LateAttachVerifier.hasFatalErrors()){
             LateAttachVerifier.writeReport();
             throw new IllegalStateException("Late-attach preflight failed before target retransformation; see report");
         }
@@ -227,15 +227,19 @@ public class FullInjectAgent {
                 Object emInst = em.getField("INSTANCE").get(null);
                 Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientStartEvent").getField("INSTANCE").get(null);
                 java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event"));
-                if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
+                if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
                 thaw = RegistryThawSession.begin();
                 InjectionLogger.info("(MC main thread) callEvent(ClientStartEvent)");
                 callEvent.invoke(emInst, ev);
-                if(LateAttachVerifier.hasErrors())throw new IllegalStateException("ClientStartEvent class loading produced verification errors");
+                if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("ClientStartEvent class loading produced verification errors");
                 InjectionLogger.info("ClientStartEvent dispatched");
                 restoreRegistriesAfterInitialization(mcCls, mc, thaw);
             } catch (Throwable t) {
-                if(thaw!=null){thaw.close();if(thaw.restored)lbrt.JoinGate.cancelAndOpen();}
+                // Always reopen the gate on ANY kick failure, including a throw BEFORE RegistryThawSession.begin()
+                // (LiquidBounce clinit, reflection, or the fatal-error check) where thaw is still null — otherwise
+                // the gate blocked above stays closed for the session and multiplayer is permanently locked out.
+                if(thaw!=null)thaw.close();
+                lbrt.JoinGate.cancelAndOpen();
                 LateAttachVerifier.error("BOOTSTRAP_KICK_FAILURE","LiquidBounce","bootstrap",rootMsg(t));
                 InjectionLogger.error("kick error", t); } };
             mcCls.getMethod("execute", Runnable.class).invoke(mc, kick);
@@ -259,7 +263,10 @@ public class FullInjectAgent {
             catch(Throwable e){ LateAttachVerifier.error("CALLER_RETRANSFORM_FAILURE",c.getName(),"caller",rootMsg(e)); }
         }
         LateAttachVerifier.writeReport();
-        if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Late-attach verification failed before bootstrap; see report");
+        // Activation is intentionally best-effort per class: some targets legitimately cannot be retransformed live
+        // (e.g. ChatComponent's field-adding mixin), so a single batch retransform would fail all-or-nothing. Only a
+        // FATAL error aborts here; tolerable per-target/caller residue must not force the join gate closed.
+        if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("Late-attach verification failed during target activation; see report");
     }
     /** define into the app loader with the given PD (matches signer of signed target packages); true on success or
      *  benign already-defined, false on a real ClassFormat/Verify defect. */
@@ -324,9 +331,17 @@ public class FullInjectAgent {
             InjectionLogger.info("restored original state of "+count+"/"+original.size()+" registries"+(restored?"":"; join gate remains closed"));}
     }
     static void restoreAndOpen(RegistryThawSession thaw,boolean initializationSucceeded){
-        thaw.close();if(!thaw.restored)return;
-        if(!initializationSucceeded){InjectionLogger.error("initialization failed; join gate remains closed");return;}
-        try{lbrt.JoinGate.open();}catch(Throwable t){LateAttachVerifier.error("DEFERRED_JOIN_FAILURE","ConnectScreen","join-gate",rootMsg(t));}
+        thaw.close();
+        // The gate must ALWAYS be released here so a failed/partial bootstrap can never leave multiplayer permanently
+        // locked. On full success replay the deferred join; otherwise (registries not fully restored, or LB did not
+        // initialize) don't replay into a half-set-up client, but still unblock so the user can retry the join.
+        if(thaw.restored && initializationSucceeded){
+            try{lbrt.JoinGate.open();}
+            catch(Throwable t){LateAttachVerifier.error("DEFERRED_JOIN_FAILURE","ConnectScreen","join-gate",rootMsg(t));lbrt.JoinGate.cancelAndOpen();}
+        } else {
+            InjectionLogger.error("initialization incomplete; dropping deferred join and unblocking gate");
+            lbrt.JoinGate.cancelAndOpen();
+        }
     }
     /** LB initializes asynchronously after ClientStartEvent. Restore on every outcome, including timeout/interruption. */
     static void restoreRegistriesAfterInitialization(Class<?> mcCls, Object mc, RegistryThawSession thaw) {
@@ -342,7 +357,7 @@ public class FullInjectAgent {
                 }
                 Thread.sleep(50L);
             }
-            if(!LateAttachVerifier.hasErrors()){InjectionLogger.info("LiquidBounce initialization completed");ready.set(true);}
+            if(!LateAttachVerifier.hasFatalErrors()){InjectionLogger.info("LiquidBounce initialization completed");ready.set(true);}
         } catch (InterruptedException t) {
             Thread.currentThread().interrupt();
             LateAttachVerifier.error("BOOTSTRAP_INTERRUPTED","registries","bootstrap",String.valueOf(t));
@@ -357,11 +372,13 @@ public class FullInjectAgent {
             }finally{done.complete(null);}};
             try {
                 mcCls.getMethod("execute", Runnable.class).invoke(mc, restore);
+                // If the main-thread restore runnable (which releases the gate via restoreAndOpen) never completes,
+                // release the gate here too so a stalled/failed activation cannot leave multiplayer locked out.
                 try{done.get(60,TimeUnit.SECONDS);}
-                catch(TimeoutException t){LateAttachVerifier.warn("REGISTRY_RESTORE_MAIN_THREAD_TIMEOUT","registries","bootstrap","Main thread did not finish activation/restore within 60 seconds; applying state fallback");thaw.close();}
-                catch(InterruptedException t){Thread.currentThread().interrupt();thaw.close();}
-                catch(ExecutionException t){LateAttachVerifier.error("REGISTRY_RESTORE_TASK_FAILURE","registries","bootstrap",rootMsg(t));thaw.close();}
-            } catch(Throwable t){ thaw.close();if(thaw.restored)lbrt.JoinGate.cancelAndOpen();LateAttachVerifier.error("REGISTRY_RESTORE_SCHEDULE_FAILURE","registries","bootstrap",rootMsg(t)); }
+                catch(TimeoutException t){LateAttachVerifier.warn("REGISTRY_RESTORE_MAIN_THREAD_TIMEOUT","registries","bootstrap","Main thread did not finish activation/restore within 60 seconds; applying state fallback");thaw.close();lbrt.JoinGate.cancelAndOpen();}
+                catch(InterruptedException t){Thread.currentThread().interrupt();thaw.close();lbrt.JoinGate.cancelAndOpen();}
+                catch(ExecutionException t){LateAttachVerifier.error("REGISTRY_RESTORE_TASK_FAILURE","registries","bootstrap",rootMsg(t));thaw.close();lbrt.JoinGate.cancelAndOpen();}
+            } catch(Throwable t){ thaw.close();lbrt.JoinGate.cancelAndOpen();LateAttachVerifier.error("REGISTRY_RESTORE_SCHEDULE_FAILURE","registries","bootstrap",rootMsg(t)); }
         } }, "lb-registry-restore");
         waiter.setDaemon(true);
         waiter.start();
