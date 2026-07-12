@@ -80,7 +80,21 @@ if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'jar (enterworld) failed' }
 Pop-Location
 Write-Host '[build] enterworld.jar OK'
 
-# --- 4. guimsgprobe.jar -----------------------------------------------------------------------------------
+# --- 4. joinserver.jar ------------------------------------------------------------------------------------
+$JsDir = Join-Path $Repo 'build\joinserver'
+New-Item -ItemType Directory -Force $JsDir | Out-Null
+& "$Jdk\javac.exe" --release 25 -d $JsDir (Join-Path $Src 'JoinServer.java')
+if ($LASTEXITCODE -ne 0) { throw 'javac (JoinServer) failed' }
+@'
+Agent-Class: JoinServer
+'@ | Set-Content -Path (Join-Path $JsDir 'manifest.txt') -Encoding ascii
+Push-Location $JsDir
+& "$Jdk\jar.exe" cfm joinserver.jar manifest.txt JoinServer.class
+if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'jar (joinserver) failed' }
+Pop-Location
+Write-Host '[build] joinserver.jar OK'
+
+# --- 5. guimsgprobe.jar -----------------------------------------------------------------------------------
 $PrDir = Join-Path $Repo 'build\guimsgprobe'
 New-Item -ItemType Directory -Force $PrDir | Out-Null
 & "$Jdk\javac.exe" --release 25 -d $PrDir (Join-Path $Src 'GuiMsgProbe.java')
