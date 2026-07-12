@@ -28,6 +28,8 @@ public final class ConverterAutoTests {
     }
 
     public static void main(String[] args) throws Exception {
+        testMixinJava25Compatibility();
+        if(args.length>0&&args[0].equals("compat")){System.out.println("[AUTO-TEST] assembled agent reports Java 25-compatible ASM");return;}
         testDuckDispatch();
         testAmbiguousCallerRewrite();
         testStaticAccessorRewrite();
@@ -35,6 +37,13 @@ public final class ConverterAutoTests {
         testJoinGateRewrite();
         testSchemaGate();
         System.out.println("[AUTO-TEST] all converter automation fixtures passed");
+    }
+
+    static void testMixinJava25Compatibility() throws Exception {
+        Class<?> levels=Class.forName("org.spongepowered.asm.mixin.MixinEnvironment$CompatibilityLevel");
+        Object java25=levels.getField("JAVA_25").get(null);
+        Method supported=levels.getDeclaredMethod("isSupported");supported.setAccessible(true);
+        yes((Boolean)supported.invoke(java25));
     }
 
     static void testDuckDispatch() {

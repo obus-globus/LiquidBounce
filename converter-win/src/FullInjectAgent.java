@@ -40,6 +40,7 @@ public class FullInjectAgent {
 
     public static void agentmain(String a, Instrumentation inst) throws Exception {
         INST = inst;
+        verifyAsmRuntime();
         for (Class<?> c : inst.getAllLoadedClasses()) preLoaded.add(c.getName().replace('.','/'));   // snapshot BEFORE we load anything
         inst.redefineModule(Object.class.getModule(), Set.of(), Map.of(), Map.of("java.lang", Set.of(FullInjectAgent.class.getModule())), Set.of(), Map.of());
         defineClass5 = ClassLoader.class.getDeclaredMethod("defineClass", String.class, byte[].class, int.class, int.class, ProtectionDomain.class); defineClass5.setAccessible(true);
@@ -327,6 +328,15 @@ public class FullInjectAgent {
         waiter.start();
     }
     static byte[] awApply(String n, byte[] b){ try { Object r = AW_APPLY.invoke(AW, n, b); return (byte[]) r; } catch(Throwable t){ return null; } }
+    static void verifyAsmRuntime() throws Exception {
+        Class<?> opcodes=Class.forName("org.objectweb.asm.Opcodes",true,SYS);
+        String version=opcodes.getPackage().getImplementationVersion();
+        Object source=opcodes.getProtectionDomain().getCodeSource()==null?"bootstrap/unknown":opcodes.getProtectionDomain().getCodeSource().getLocation();
+        Class<?> asmInfo=Class.forName("org.spongepowered.asm.util.asm.ASM",true,SYS);
+        boolean supported=(Boolean)asmInfo.getMethod("isAtLeastVersion",int.class,int.class).invoke(null,9,8);
+        System.out.println("[FULL] ASM runtime="+version+" source="+source+" Java25Compatible="+supported);
+        if(!supported)throw new IllegalStateException("LiquidBounce Java 25 requires ASM >= 9.8, but active ASM is "+version+" from "+source+". Restart with a correctly packaged agent or remove the preloaded ASM collision.");
+    }
     static void preflightLbClasses(Path lbJar,RetransformConverter.Resolver resolver,Map<String,String[]> gadded,
             Map<String,String[]> gfield,Map<String,List<String[]>> ifaces){int total=0,changed=0,failed=0;
         try(JarFile jf=new JarFile(lbJar.toFile())){for(var en=jf.entries();en.hasMoreElements();){JarEntry e=en.nextElement();String n=e.getName();
