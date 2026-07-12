@@ -1,0 +1,4 @@
+[49504:39572:0712/222410.972:ERROR:google_apis\gcm\engine\registration_request.cc:292] Registration response error message: DEPRECATED_ENDPOINT
+[49504:39572:0712/222411.228:ERROR:google_apis\gcm\engine\mcs_client.cc:700]   Error code: 401  Error message: Authentication Failed: wrong_secret
+[49504:39572:0712/222411.231:ERROR:google_apis\gcm\engine\mcs_client.cc:702] Failed to log in to GCM, resetting connection.
+[49504:51520:0712/222412.773:ERROR:chrome\browser\extensions\crx_installer.cc:962] Could not load javascript 'content_scripts/express/google-image-preview/google-image-preview-express-fte.js' for script. efaidnbmnnnibpcajpcglclefindmkaj 
