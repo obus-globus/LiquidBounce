@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import lbrt.InjectionLogger;
 
 /** Fail-fast structural and residual-reference validation for schema-neutral late-attach output. */
 public final class LateAttachVerifier {
@@ -185,8 +186,8 @@ public final class LateAttachVerifier {
             j.append("]}");Files.writeString(tmp,j,StandardCharsets.UTF_8);
             try{Files.move(tmp,out,StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);}
             catch(AtomicMoveNotSupportedException e){Files.move(tmp,out,StandardCopyOption.REPLACE_EXISTING);}
-            REPORT_STARTED=true;System.out.println("[FULL] verification report: "+out);return out;
-        }catch(Throwable t){System.out.println("[FULL] verification report failed -> "+t);return null;}
+            REPORT_STARTED=true;InjectionLogger.info("verification report: "+out);return out;
+        }catch(Throwable t){InjectionLogger.error("verification report failed",t);return null;}
     }
     private static String json(String k,String v){return "\""+k+"\":\""+escape(v)+"\"";}
     private static String escape(String s){if(s==null)return "";return s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r");}

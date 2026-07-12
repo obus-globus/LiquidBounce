@@ -10,6 +10,7 @@ import org.objectweb.asm.ClassReader;
 import java.io.*; import java.lang.instrument.*; import java.lang.reflect.Method;
 import java.nio.file.*; import java.security.ProtectionDomain; import java.util.*; import java.util.concurrent.*; import java.util.jar.*;
 import vspike.VSpikeService;
+import lbrt.InjectionLogger;
 
 /** MILESTONE 2/3: attach to a fully-running MC and inject FULL LiquidBounce. Uniform-convert every mixin
  *  target (already-loaded -> retransform; future -> on-load CFT returns target'); rewrite LB callers to
@@ -41,13 +42,14 @@ public class FullInjectAgent {
             return ok; } } }
 
     public static void agentmain(String a, Instrumentation inst) throws Exception {
+        InjectionLogger.configure(a);
         INST = inst;
         verifyAsmRuntime();
         for (Class<?> c : inst.getAllLoadedClasses()) preLoaded.add(c.getName().replace('.','/'));   // snapshot BEFORE we load anything
         inst.redefineModule(Object.class.getModule(), Set.of(), Map.of(), Map.of("java.lang", Set.of(FullInjectAgent.class.getModule())), Set.of(), Map.of());
         defineClass5 = ClassLoader.class.getDeclaredMethod("defineClass", String.class, byte[].class, int.class, int.class, ProtectionDomain.class); defineClass5.setAccessible(true);
         RetransformConverter.CLASS_BYTES = (nm) -> { try (InputStream in = SYS.getResourceAsStream(nm + ".class")) { return in==null?null:in.readAllBytes(); } catch(Throwable t){ return null; } };
-        System.out.println("[FULL] staging LB bundle onto system loader ("+preLoaded.size()+" classes already loaded)");
+        InjectionLogger.info("staging LB bundle onto system loader ("+preLoaded.size()+" classes already loaded)");
         File self = new File(FullInjectAgent.class.getProtectionDomain().getCodeSource().getLocation().toURI());
         Path tmp = Files.createTempDirectory("lb-full-"); tmp.toFile().deleteOnExit();
         Path lbBundle = null;
@@ -64,7 +66,7 @@ public class FullInjectAgent {
             inst.appendToSystemClassLoaderSearch(new JarFile(o.toFile())); } }
         if(lbBundle==null)throw new IllegalStateException("Bundled liquidbounce.jar not found");
         Thread.currentThread().setContextClassLoader(SYS);
-        try { Class.forName("vspike.McefNative").getMethod("stageIfBundled", File.class, String.class).invoke(null, self, "[FULL]"); } catch (Throwable t) {}
+        try { Class.forName("vspike.McefNative").getMethod("stageIfBundled", File.class, String.class).invoke(null, self, InjectionLogger.PREFIX); } catch (Throwable t) {}
 
         System.setProperty("mixin.bootstrapService", "vspike.VSpikeServiceBootstrap"); System.setProperty("mixin.service", "vspike.VSpikeService");
         Object aw = Class.forName("vspike.AccessWidener").getConstructor(InputStream.class).newInstance(SYS.getResourceAsStream("liquidbounce.accesswidener"));
@@ -84,8 +86,8 @@ public class FullInjectAgent {
         try { var caF = aw.getClass().getDeclaredField("classAccessible"); caF.setAccessible(true);
             @SuppressWarnings("unchecked") Set<String> ca = (Set<String>) caF.get(aw);
             for (String cn : ca) { if (!preLoaded.contains(cn)) continue; try { Class<?> k = Class.forName(cn.replace('/','.'), false, SYS); if (!java.lang.reflect.Modifier.isPublic(k.getModifiers())) INACC.add(cn); } catch(Throwable t){} }
-            System.out.println("[FULL] inaccessible already-loaded AW classes: "+INACC.size()+" "+INACC);
-        } catch(Throwable t){ System.out.println("[FULL] INACC compute failed -> "+rootMsg(t)); }
+            InjectionLogger.info("inaccessible already-loaded AW classes: "+INACC.size()+" "+INACC);
+        } catch(Throwable t){ InjectionLogger.warn("INACC compute failed -> "+rootMsg(t)); }
 
         List<String> targets = new ArrayList<>();
         try (var r = new BufferedReader(new InputStreamReader(SYS.getResourceAsStream("lb-mixin-targets.txt")))) { String l; while ((l=r.readLine())!=null) if(!l.isBlank()) targets.add(l.trim().replace('.','/')); }
@@ -107,9 +109,9 @@ public class FullInjectAgent {
             byte[] O; try (InputStream in=SYS.getResourceAsStream(internal+".class")){ if(in==null) continue; O=in.readAllBytes(); }
             byte[] X = tr.transformClassBytes(internal.replace('/','.'), internal.replace('/','.'), O); if (X==null || Arrays.equals(X,O)) continue;
             txMap.put(internal, new byte[][]{O, X}); RetransformConverter.collectAdded(internal, O, X, gadded, gfield, giface);
-        } catch (Throwable e) { phaseFailures.add(internal); LateAttachVerifier.error("MIXIN_TRANSFORM_FAILURE",internal,"target",rootMsg(e)); System.out.println("[FULL] transform fail "+internal+" -> "+rootMsg(e)); } }
+        } catch (Throwable e) { phaseFailures.add(internal); LateAttachVerifier.error("MIXIN_TRANSFORM_FAILURE",internal,"target",rootMsg(e)); InjectionLogger.error("transform fail "+internal+" -> "+rootMsg(e)); } }
         RetransformConverter.GADDED = gadded; RetransformConverter.GFIELD = gfield; RetransformConverter.GIFACE = giface;
-        System.out.println("[FULL] phase A: "+txMap.size()+" transformed; global added-methods="+gadded.size()+" added-fields="+gfield.size());
+        InjectionLogger.info("phase A: "+txMap.size()+" transformed; global added-methods="+gadded.size()+" added-fields="+gfield.size());
         // Phase B: stage every conversion against the complete global tables.
         int conv=0, eager=0; List<String> skipped=new ArrayList<>();
         LinkedHashMap<String,Conv> pendingConv=new LinkedHashMap<>();
@@ -127,7 +129,7 @@ public class FullInjectAgent {
                 if(!duplicate) impls.add(new String[]{internal, res.sidecarName});
             }
             pendingConv.put(internal, cv); conv++;
-        } catch (Throwable ex) { skipped.add(internal); LateAttachVerifier.error("CONVERSION_FAILURE",internal,"target",rootMsg(ex)); System.out.println("[FULL] convert fail "+internal+" -> "+rootMsg(ex)); } }
+        } catch (Throwable ex) { skipped.add(internal); LateAttachVerifier.error("CONVERSION_FAILURE",internal,"target",rootMsg(ex)); InjectionLogger.error("convert fail "+internal+" -> "+rootMsg(ex)); } }
         if(!phaseFailures.isEmpty()||!skipped.isEmpty()||LateAttachVerifier.hasErrors()){
             LateAttachVerifier.writeReport();
             throw new IllegalStateException("Late-attach conversion gate failed; no partial conversion was published");
@@ -140,7 +142,7 @@ public class FullInjectAgent {
             LateAttachVerifier.writeReport();
             throw new IllegalStateException("Late-attach sidecar definition gate failed");
         }
-        System.out.println("[FULL] converted "+conv+" targets ("+eager+" sidecars eager-defined); ifaceMap="+ifaceMap.size()+" interfaces; skipped="+skipped.size()+(skipped.isEmpty()?"":" "+skipped));
+        InjectionLogger.info("converted "+conv+" targets ("+eager+" sidecars eager-defined); ifaceMap="+ifaceMap.size()+" interfaces; skipped="+skipped.size()+(skipped.isEmpty()?"":" "+skipped));
         for (var ie : ifaceMap.entrySet()) for (String[] impl : ie.getValue())
             lbrt.DuckDispatch.register(ie.getKey(), impl[0], impl[1]);
 
@@ -186,7 +188,7 @@ public class FullInjectAgent {
                     return rw==b?null:rw;
                 }
                 if (n.startsWith("net/minecraft/")||n.startsWith("com/mojang/")) return awApply(n,b);  // widen future MC classes (on-load) + AW-class retransforms
-            } catch(Throwable x){ LateAttachVerifier.error("TRANSFORM_FAILURE",n,"cft",rootMsg(x)); System.out.println("[FULL] CFT fail "+n+" -> "+rootMsg(x)); x.printStackTrace(System.out); }
+            } catch(Throwable x){ LateAttachVerifier.error("TRANSFORM_FAILURE",n,"cft",rootMsg(x)); InjectionLogger.error("CFT fail "+n, x); }
             return null; } }, true);
         refreshLoadedAccessState(inst,aw);
 
@@ -227,18 +229,18 @@ public class FullInjectAgent {
                 java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event"));
                 if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
                 thaw = RegistryThawSession.begin();
-                System.out.println("[FULL] (MC main thread) callEvent(ClientStartEvent)");
+                InjectionLogger.info("(MC main thread) callEvent(ClientStartEvent)");
                 callEvent.invoke(emInst, ev);
                 if(LateAttachVerifier.hasErrors())throw new IllegalStateException("ClientStartEvent class loading produced verification errors");
-                System.out.println("[FULL] ClientStartEvent dispatched");
+                InjectionLogger.info("ClientStartEvent dispatched");
                 restoreRegistriesAfterInitialization(mcCls, mc, thaw);
             } catch (Throwable t) {
                 if(thaw!=null){thaw.close();if(thaw.restored)lbrt.JoinGate.cancelAndOpen();}
                 LateAttachVerifier.error("BOOTSTRAP_KICK_FAILURE","LiquidBounce","bootstrap",rootMsg(t));
-                System.out.println("[FULL] kick error -> "+rootMsg(t)); t.printStackTrace(); } };
+                InjectionLogger.error("kick error", t); } };
             mcCls.getMethod("execute", Runnable.class).invoke(mc, kick);
-            System.out.println("[FULL] scheduled LB bootstrap on MC main thread");
-        } catch (Throwable e) { LateAttachVerifier.error("BOOTSTRAP_SCHEDULE_FAILURE","LiquidBounce","bootstrap",rootMsg(e)); lbrt.JoinGate.cancelAndOpen(); System.out.println("[FULL] bootstrap kick FAILED -> "+e); e.printStackTrace(); }
+            InjectionLogger.info("scheduled LB bootstrap on MC main thread");
+        } catch (Throwable e) { LateAttachVerifier.error("BOOTSTRAP_SCHEDULE_FAILURE","LiquidBounce","bootstrap",rootMsg(e)); lbrt.JoinGate.cancelAndOpen(); InjectionLogger.error("bootstrap kick failed", e); }
     }
 
     /** Publish all already-loaded target/caller rewrites from the Minecraft thread after bootstrap readiness. */
@@ -248,10 +250,10 @@ public class FullInjectAgent {
             if (convMap.containsKey(in)&&preLoaded.contains(in)&&!in.equals(JoinGateRewriter.CONNECT_SCREEN)) { try {
                 if(!inst.isModifiableClass(c))throw new UnmodifiableClassException(in);
                 inst.retransformClasses(c); rt++;
-            } catch(Throwable e){ String det=e.getMessage();Throwable cc=e;while(cc.getCause()!=null){cc=cc.getCause();if(cc.getMessage()!=null)det=cc.getMessage();}String msg=e.getClass().getSimpleName()+": "+(det==null?"":det.replace('\n',' ').substring(0,Math.min(det.length(),600)));LateAttachVerifier.error("TARGET_RETRANSFORM_FAILURE",in,"target",msg);System.out.println("[FULL] retransform fail "+in+" -> "+msg); }
+            } catch(Throwable e){ String det=e.getMessage();Throwable cc=e;while(cc.getCause()!=null){cc=cc.getCause();if(cc.getMessage()!=null)det=cc.getMessage();}String msg=e.getClass().getSimpleName()+": "+(det==null?"":det.replace('\n',' ').substring(0,Math.min(det.length(),600)));LateAttachVerifier.error("TARGET_RETRANSFORM_FAILURE",in,"target",msg);InjectionLogger.warn("retransform fail "+in+" -> "+msg); }
             }
         }
-        System.out.println("[FULL] retransformed "+rt+" already-loaded targets on MC main thread");
+        InjectionLogger.info("retransformed "+rt+" already-loaded targets on MC main thread");
         for (Class<?> c : inst.getAllLoadedClasses()) if (preBootstrapLb.contains(c.getName())&&inst.isModifiableClass(c)) {
             try { inst.retransformClasses(c); }
             catch(Throwable e){ LateAttachVerifier.error("CALLER_RETRANSFORM_FAILURE",c.getName(),"caller",rootMsg(e)); }
@@ -265,7 +267,7 @@ public class FullInjectAgent {
         catch(Throwable t){ Throwable c=t.getCause()!=null?t.getCause():t;
             String m=String.valueOf(c.getMessage());
             if (m.contains("duplicate")) return true;                         // already defined -> fine
-            System.out.println("[FULL] DEFINE-FAIL "+dotted+" -> "+c.getClass().getSimpleName()+": "+c.getMessage());
+            InjectionLogger.error("DEFINE-FAIL "+dotted+" -> "+c.getClass().getSimpleName()+": "+c.getMessage());
             return false; } }
     static synchronized boolean defineSynthetics(byte[] cb, ProtectionDomain pd){
         boolean ok=true;
@@ -288,7 +290,7 @@ public class FullInjectAgent {
         return ok;
     }
     static void syntheticError(String code,String dotted,String message){
-        System.out.println("[FULL] SYNTH-FAIL "+dotted+" -> "+message);
+        InjectionLogger.error("SYNTH-FAIL "+dotted+" -> "+message);
         LateAttachVerifier.error(code,dotted.replace('.','/'),"synthetic",message);
     }
     static List<String> scanSyn(byte[] b){ LinkedHashSet<String> o=new LinkedHashSet<>(); try{ ClassReader cr=new ClassReader(b);String self=cr.getClassName(); char[] bu=new char[cr.getMaxStringLength()]; for(int i=1;i<cr.getItemCount();i++){int off=cr.getItem(i); if(off==0||off-1<0)continue; if((b[off-1]&0xff)!=7)continue; try{String n=cr.readUTF8(off,bu); if(n!=null&&!n.equals(self)&&(n.startsWith("org/spongepowered/asm/synthetic/")||n.contains("$Anonymous$")))o.add(n);}catch(Throwable x){}}}catch(Throwable x){} return new ArrayList<>(o); }
@@ -310,7 +312,7 @@ public class FullInjectAgent {
             RegistryThawSession session=new RegistryThawSession(fz,states);
             try{
                 for(var e:states.entrySet())if(e.getValue())fz.setBoolean(e.getKey(),false);
-                System.out.println("[FULL] thawed "+states.values().stream().filter(Boolean::booleanValue).count()+"/"+states.size()+" registries");
+                InjectionLogger.info("thawed "+states.values().stream().filter(Boolean::booleanValue).count()+"/"+states.size()+" registries");
                 return session;
             }catch(Throwable t){session.close();if(session.restored)try{lbrt.JoinGate.open();}catch(Throwable ignored){}
                 if(t instanceof Exception e)throw e;if(t instanceof Error e)throw e;throw new RuntimeException(t);}
@@ -319,11 +321,11 @@ public class FullInjectAgent {
             for(var e:original.entrySet())try{frozen.setBoolean(e.getKey(),e.getValue());count++;}
                 catch(Throwable t){failures++;LateAttachVerifier.error("REGISTRY_RESTORE_FAILURE","registries","bootstrap",rootMsg(t));}
             restored=failures==0;
-            System.out.println("[FULL] restored original state of "+count+"/"+original.size()+" registries"+(restored?"":"; join gate remains closed"));}
+            InjectionLogger.info("restored original state of "+count+"/"+original.size()+" registries"+(restored?"":"; join gate remains closed"));}
     }
     static void restoreAndOpen(RegistryThawSession thaw,boolean initializationSucceeded){
         thaw.close();if(!thaw.restored)return;
-        if(!initializationSucceeded){System.out.println("[FULL] initialization failed; join gate remains closed");return;}
+        if(!initializationSucceeded){InjectionLogger.error("initialization failed; join gate remains closed");return;}
         try{lbrt.JoinGate.open();}catch(Throwable t){LateAttachVerifier.error("DEFERRED_JOIN_FAILURE","ConnectScreen","join-gate",rootMsg(t));}
     }
     /** LB initializes asynchronously after ClientStartEvent. Restore on every outcome, including timeout/interruption. */
@@ -340,7 +342,7 @@ public class FullInjectAgent {
                 }
                 Thread.sleep(50L);
             }
-            if(!LateAttachVerifier.hasErrors())ready.set(true);
+            if(!LateAttachVerifier.hasErrors()){InjectionLogger.info("LiquidBounce initialization completed");ready.set(true);}
         } catch (InterruptedException t) {
             Thread.currentThread().interrupt();
             LateAttachVerifier.error("BOOTSTRAP_INTERRUPTED","registries","bootstrap",String.valueOf(t));
@@ -350,7 +352,7 @@ public class FullInjectAgent {
             CompletableFuture<Void> done=new CompletableFuture<>();
             Runnable restore=()->{try{
                 if(ready.get())try{activateLoadedTargets(INST);}
-                catch(Throwable t){ready.set(false);LateAttachVerifier.error("TARGET_ACTIVATION_FAILURE","targets","bootstrap",rootMsg(t));System.out.println("[FULL] target activation FAILED -> "+rootMsg(t));}
+                catch(Throwable t){ready.set(false);LateAttachVerifier.error("TARGET_ACTIVATION_FAILURE","targets","bootstrap",rootMsg(t));InjectionLogger.error("target activation failed -> "+rootMsg(t));}
                 restoreAndOpen(thaw,ready.get());
             }finally{done.complete(null);}};
             try {
@@ -371,7 +373,7 @@ public class FullInjectAgent {
         Object source=opcodes.getProtectionDomain().getCodeSource()==null?"bootstrap/unknown":opcodes.getProtectionDomain().getCodeSource().getLocation();
         Class<?> asmInfo=Class.forName("org.spongepowered.asm.util.asm.ASM",true,SYS);
         boolean supported=(Boolean)asmInfo.getMethod("isAtLeastVersion",int.class,int.class).invoke(null,9,8);
-        System.out.println("[FULL] ASM runtime="+version+" source="+source+" Java25Compatible="+supported);
+        InjectionLogger.info("ASM runtime="+version+" source="+source+" Java25Compatible="+supported);
         if(!supported)throw new IllegalStateException("LiquidBounce Java 25 requires ASM >= 9.8, but active ASM is "+version+" from "+source+". Restart with a correctly packaged agent or remove the preloaded ASM collision.");
     }
     static void preflightLbClasses(Path lbJar,RetransformConverter.Resolver resolver,Map<String,String[]> gadded,
@@ -386,7 +388,7 @@ public class FullInjectAgent {
                 if(!Arrays.equals(b,rw))changed++;
             }catch(Throwable t){failed++;LateAttachVerifier.error("CALLER_PREFLIGHT_FAILURE",n,"caller",rootMsg(t));}
         }}catch(Throwable t){LateAttachVerifier.error("CALLER_PREFLIGHT_IO_FAILURE",String.valueOf(lbJar),"caller",rootMsg(t));failed++;}
-        System.out.println("[FULL] LB caller preflight: "+total+" classes, "+changed+" rewritten, "+failed+" failed");
+        InjectionLogger.info("LB caller preflight: "+total+" classes, "+changed+" rewritten, "+failed+" failed");
     }
     static void refreshLoadedAccessState(Instrumentation inst,Object aw){try{
         java.lang.reflect.Field caF=aw.getClass().getDeclaredField("classAccessible");caF.setAccessible(true);
@@ -396,7 +398,7 @@ public class FullInjectAgent {
             if(preLoaded.add(n))added++;
             if(ca.contains(n)&&!java.lang.reflect.Modifier.isPublic(c.getModifiers()))INACC.add(n);
         }
-        System.out.println("[FULL] refreshed attach-window classes: +"+added+"; inaccessible="+INACC.size());
+        InjectionLogger.info("refreshed attach-window classes: +"+added+"; inaccessible="+INACC.size());
     }catch(Throwable t){LateAttachVerifier.error("ACCESS_STATE_REFRESH_FAILURE","access-widener","preflight",rootMsg(t));}}
     static boolean isPreloadedMc(String o){ return preLoaded.contains(o) && (o.startsWith("net/minecraft/")||o.startsWith("com/mojang/")); }
     static boolean fieldNonPublic(String owner, String name){ return cachedBoolean(npField,owner+"#"+name,() -> {

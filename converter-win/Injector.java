@@ -25,9 +25,101 @@
 import com.sun.tools.attach.VirtualMachine;
 import com.sun.tools.attach.VirtualMachineDescriptor;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
+import java.util.function.Consumer;
 
 public class Injector {
+    /**
+     * Performs one agent injection without terminating the caller. This is also
+     * used by InjectorUi, while main below remains compatible with the original
+     * command-line interface.
+     */
+    public static void inject(String pid, File jar, String agentArgs, Consumer<String> log) throws Exception {
+        inject(pid, jar, agentArgs, log, null);
+    }
+
+    public static void inject(String pid, File jar, String agentArgs, Consumer<String> log,
+                              Consumer<File> targetLogFound) throws Exception {
+        if (pid == null || pid.isBlank())
+            throw new IllegalArgumentException("PID is required");
+        if (jar == null || !jar.isFile())
+            throw new IllegalArgumentException("Agent jar not found: " + (jar == null ? "<null>" : jar.getAbsolutePath()));
+
+        File absoluteJar = jar.getAbsoluteFile();
+        Consumer<String> output = log != null ? log : ignored -> {};
+        VirtualMachine vm = null;
+        try {
+            output.accept("Attaching to PID " + pid + " ...");
+            vm = VirtualMachine.attach(pid.trim());
+            output.accept("Attached successfully.");
+            if (targetLogFound != null) try {
+                File targetLog = findMinecraftLog(vm.getSystemProperties());
+                if (targetLog != null) {
+                    output.accept("Minecraft log: " + targetLog);
+                    targetLogFound.accept(targetLog);
+                } else {
+                    output.accept("Minecraft latest.log could not be located; target loading logs will not be streamed.");
+                }
+            } catch (Exception logDiscoveryFailure) {
+                output.accept("Minecraft log discovery failed; continuing injection: " + logDiscoveryFailure.getMessage());
+            }
+            output.accept("Loading agent: " + absoluteJar);
+            vm.loadAgent(absoluteJar.getPath(), agentArgs == null ? "" : agentArgs);
+            output.accept("Agent loaded successfully.");
+        } finally {
+            if (vm != null) {
+                try {
+                    vm.detach();
+                    output.accept("Detached from PID " + pid + ".");
+                } catch (Throwable detachFailure) {
+                    output.accept("Warning: detach failed: " + detachFailure.getMessage());
+                }
+            }
+        }
+    }
+
+    private static File findMinecraftLog(Properties properties) {
+        String command = properties.getProperty("sun.java.command", "");
+        List<String> arguments = splitCommandLine(command);
+        for (int i = 0; i + 1 < arguments.size(); i++) {
+            if (arguments.get(i).equals("--gameDir")) {
+                File log = new File(arguments.get(i + 1), "logs" + File.separator + "latest.log");
+                if (log.isFile()) return log.getAbsoluteFile();
+            }
+        }
+
+        String userDir = properties.getProperty("user.dir");
+        if (userDir != null && !userDir.isBlank()) {
+            File log = new File(userDir, "logs" + File.separator + "latest.log");
+            if (log.isFile()) return log.getAbsoluteFile();
+        }
+        return null;
+    }
+
+    /** Enough Windows-style command-line parsing for quoted --gameDir paths. */
+    private static List<String> splitCommandLine(String command) {
+        List<String> result = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean quoted = false;
+        for (int i = 0; i < command.length(); i++) {
+            char c = command.charAt(i);
+            if (c == '\"') {
+                quoted = !quoted;
+            } else if (Character.isWhitespace(c) && !quoted) {
+                if (!current.isEmpty()) {
+                    result.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(c);
+            }
+        }
+        if (!current.isEmpty()) result.add(current.toString());
+        return result;
+    }
+
     public static void main(String[] args) {
         if (args.length < 2) {
             System.err.println("usage: java -cp out Injector <pid> <agent.jar> [agentArgs]");
@@ -45,14 +137,8 @@ public class Injector {
             System.exit(3);
         }
 
-        VirtualMachine vm = null;
         try {
-            System.out.println("[INJ] attaching to pid " + pid + " ...");
-            vm = VirtualMachine.attach(pid);
-            System.out.println("[INJ] attached; loadAgent(" + jar.getAbsolutePath() + ", \"" + agentArgs + "\")");
-            // Pass the ABSOLUTE path so the target JVM (whose cwd differs) resolves it correctly.
-            vm.loadAgent(jar.getAbsolutePath(), agentArgs);
-            System.out.println("[INJ] loadAgent returned OK");
+            inject(pid, jar, agentArgs, message -> System.out.println("[INJ] " + message));
         } catch (Throwable t) {
             System.err.println("[INJ] FAILED: " + t.getClass().getName() + ": " + t.getMessage());
             // Most common causes on Windows:
@@ -63,8 +149,6 @@ public class Injector {
             // Note: an AgentLoadException/AgentInitializationException means the agent WAS delivered but
             // agentmain returned non-zero / threw — inspect the Minecraft log, the attach itself succeeded.
             System.exit(1);
-        } finally {
-            if (vm != null) try { vm.detach(); } catch (Throwable ignore) {}
         }
         // Print the currently-visible JVMs for convenience (helps confirm the PID was the real one).
         List<VirtualMachineDescriptor> list = VirtualMachine.list();
