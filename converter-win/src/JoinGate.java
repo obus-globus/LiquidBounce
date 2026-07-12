@@ -5,7 +5,7 @@ import java.lang.reflect.*;
 
 /** Defers the latest server-connect request while late bootstrap temporarily thaws registries. */
 public final class JoinGate {
-    private static final ClassLoader SYS = ClassLoader.getSystemClassLoader();
+    private static final ClassLoader SYS = lbrt.Platform.LOADER;
     private static boolean blocked;
     private static Call pending;
 

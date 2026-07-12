@@ -16,9 +16,10 @@ import lbrt.InjectionLogger;
  *  target (already-loaded -> retransform; future -> on-load CFT returns target'); rewrite LB callers to
  *  sidecars; then manually kick LB's ClientStartEvent so it initializes on the already-running game. */
 public class FullInjectAgent {
-    static final ClassLoader SYS = ClassLoader.getSystemClassLoader();
+    static LoaderPlatform PLATFORM;                                               // loader-specific seams (vanilla/Fabric/NeoForge)
+    static ClassLoader SYS;                                                       // == PLATFORM.targetLoader(); holds net.minecraft.* + staged LB
     static final boolean DEBUG = Boolean.getBoolean("lb.agent.debug");
-    static IMixinTransformer tr; static MixinEnvironment env; static Method defineClass5;
+    static IMixinTransformer tr; static MixinEnvironment env;
     static final Set<String> definedSynth = ConcurrentHashMap.newKeySet();
     static final Set<String> definingSynth = ConcurrentHashMap.newKeySet();
     static final Map<String,Conv> convMap = new ConcurrentHashMap<>();             // internal -> conversion holder
@@ -26,7 +27,6 @@ public class FullInjectAgent {
     static final Set<String> targetSet = new HashSet<>();                          // internal names of mixin targets
     static Instrumentation INST;
     static final Set<String> preLoaded = ConcurrentHashMap.newKeySet();            // MC classes loaded at attach (can't be AW-widened)
-    static Object AW; static Method AW_APPLY;                                      // AccessWidener + apply(name,bytes)
     static final Map<String,Boolean> npField = new ConcurrentHashMap<>();          // owner#name -> non-public?
     static final Map<String,Boolean> npMethod = new ConcurrentHashMap<>();         // owner#name desc -> non-public?
     static final Set<String> INACC = ConcurrentHashMap.newKeySet();                // already-loaded package-private MC classes LB references by type
@@ -44,43 +44,20 @@ public class FullInjectAgent {
     public static void agentmain(String a, Instrumentation inst) throws Exception {
         InjectionLogger.configure(a);
         INST = inst;
+        PLATFORM = detectPlatform(inst);
+        SYS = PLATFORM.targetLoader();
+        lbrt.Platform.LOADER = SYS;
         verifyAsmRuntime();
         for (Class<?> c : inst.getAllLoadedClasses()) preLoaded.add(c.getName().replace('.','/'));   // snapshot BEFORE we load anything
         inst.redefineModule(Object.class.getModule(), Set.of(), Map.of(), Map.of("java.lang", Set.of(FullInjectAgent.class.getModule())), Set.of(), Map.of());
-        defineClass5 = ClassLoader.class.getDeclaredMethod("defineClass", String.class, byte[].class, int.class, int.class, ProtectionDomain.class); defineClass5.setAccessible(true);
-        RetransformConverter.CLASS_BYTES = (nm) -> { try (InputStream in = SYS.getResourceAsStream(nm + ".class")) { return in==null?null:in.readAllBytes(); } catch(Throwable t){ return null; } };
-        InjectionLogger.info("staging LB bundle onto system loader ("+preLoaded.size()+" classes already loaded)");
+        RetransformConverter.CLASS_BYTES = PLATFORM::originalBytes;
+        InjectionLogger.info("staging LB bundle ("+preLoaded.size()+" classes already loaded)");
         File self = new File(FullInjectAgent.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-        Path tmp = Files.createTempDirectory("lb-full-"); tmp.toFile().deleteOnExit();
-        Path lbBundle = null;
-        try (JarFile jf = new JarFile(self)) { for (var en = jf.entries(); en.hasMoreElements();) { JarEntry e = en.nextElement(); String n = e.getName();
-            if (n.equals("lbrt/AwReflect.class") || ((n.startsWith("lbrt/DuckDispatch") || n.startsWith("lbrt/JoinGate")) && n.endsWith(".class"))) {
-                byte[] b; try (InputStream in=jf.getInputStream(e)){ b=in.readAllBytes(); }
-                if(!define(n.substring(0, n.length()-6).replace('/','.'), b, null))
-                    throw new IllegalStateException("Cannot stage runtime class "+n);
-                continue;
-            }
-            if (!n.startsWith("agent-libs/") || !n.endsWith(".jar")) continue; Path o = tmp.resolve(new File(n).getName());
-            try (InputStream in = jf.getInputStream(e)) { Files.copy(in, o, StandardCopyOption.REPLACE_EXISTING); }
-            if(n.equals("agent-libs/liquidbounce.jar"))lbBundle=o;
-            inst.appendToSystemClassLoaderSearch(new JarFile(o.toFile())); } }
-        if(lbBundle==null)throw new IllegalStateException("Bundled liquidbounce.jar not found");
-        Thread.currentThread().setContextClassLoader(SYS);
-        try { Class.forName("vspike.McefNative").getMethod("stageIfBundled", File.class, String.class).invoke(null, self, InjectionLogger.PREFIX); } catch (Throwable t) {}
+        Path lbBundle = PLATFORM.stageBundle(inst, self);
 
-        System.setProperty("mixin.bootstrapService", "vspike.VSpikeServiceBootstrap"); System.setProperty("mixin.service", "vspike.VSpikeService");
-        Object aw = Class.forName("vspike.AccessWidener").getConstructor(InputStream.class).newInstance(SYS.getResourceAsStream("liquidbounce.accesswidener"));
-        { var f = Class.forName("vspike.VSpikeBytecodeProvider").getDeclaredField("AW"); f.setAccessible(true); f.set(null, aw); }
-        MixinBootstrap.init();
-        for (String c : new String[]{"liquidbounce.mixins.json","liquidbounce-fabric.mixins.json"}) Mixins.addConfiguration(c);
-        MixinEnvironment.getDefaultEnvironment().setSide(Side.CLIENT);
-        MixinPlatformManager pm = MixinBootstrap.getPlatform(); pm.prepare(CommandLineOptions.defaultArgs()); pm.inject();
-        Method gp = MixinEnvironment.class.getDeclaredMethod("gotoPhase", MixinEnvironment.Phase.class); gp.setAccessible(true);
-        gp.invoke(null, MixinEnvironment.Phase.INIT); gp.invoke(null, MixinEnvironment.Phase.DEFAULT);
-        tr = ((VSpikeService) MixinService.getService()).createTransformer();
-        try { com.llamalad7.mixinextras.MixinExtrasBootstrap.init(); } catch (Throwable t) {}
-        env = MixinEnvironment.getCurrentEnvironment();
-        AW = aw; AW_APPLY = aw.getClass().getMethod("apply", String.class, byte[].class);
+        PLATFORM.initMixin();
+        tr = PLATFORM.transformer(); env = PLATFORM.environment();
+        Object aw = PLATFORM.accessWidener();
         // Inaccessible types: AW-widened classes that are ALREADY loaded (so can't be widened) and still non-public.
         // LB references these by type; the CFT erases those references to Object + reflection.
         try { var caF = aw.getClass().getDeclaredField("classAccessible"); caF.setAccessible(true);
@@ -90,7 +67,7 @@ public class FullInjectAgent {
         } catch(Throwable t){ InjectionLogger.warn("INACC compute failed -> "+rootMsg(t)); }
 
         List<String> targets = new ArrayList<>();
-        try (var r = new BufferedReader(new InputStreamReader(SYS.getResourceAsStream("lb-mixin-targets.txt")))) { String l; while ((l=r.readLine())!=null) if(!l.isBlank()) targets.add(l.trim().replace('.','/')); }
+        try (var r = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(PLATFORM.bundleResource("lb-mixin-targets.txt"))))) { String l; while ((l=r.readLine())!=null) if(!l.isBlank()) targets.add(l.trim().replace('.','/')); }
         targetSet.addAll(targets);
 
         // Convert transactionally. Nothing is published/defined until every transformed target verifies, because the
@@ -106,7 +83,7 @@ public class FullInjectAgent {
         Map<String,String[]> gadded = new HashMap<>(); Map<String,String[]> gfield = new HashMap<>(); Map<String,List<String[]>> giface = new HashMap<>();
         List<String> phaseFailures = new ArrayList<>();
         for (String internal : targets) { try {
-            byte[] O; try (InputStream in=SYS.getResourceAsStream(internal+".class")){ if(in==null) continue; O=in.readAllBytes(); }
+            byte[] O = PLATFORM.originalBytes(internal); if(O==null) continue;
             byte[] X = tr.transformClassBytes(internal.replace('/','.'), internal.replace('/','.'), O); if (X==null || Arrays.equals(X,O)) continue;
             txMap.put(internal, new byte[][]{O, X}); RetransformConverter.collectAdded(internal, O, X, gadded, gfield, giface);
         } catch (Throwable e) { phaseFailures.add(internal); LateAttachVerifier.error("MIXIN_TRANSFORM_FAILURE",internal,"target",rootMsg(e)); InjectionLogger.error("transform fail "+internal+" -> "+rootMsg(e)); } }
@@ -187,7 +164,7 @@ public class FullInjectAgent {
                     if(c==null){byte[] w=awApply(n,rw);if(w!=null)rw=w;}
                     return rw==b?null:rw;
                 }
-                if (n.startsWith("net/minecraft/")||n.startsWith("com/mojang/")) return awApply(n,b);  // widen future MC classes (on-load) + AW-class retransforms
+                if (n.startsWith("net/minecraft/")||n.startsWith("com/mojang/")) return PLATFORM.cftAppliesAw()? awApply(n,b) : null;  // widen future MC classes (on-load) + AW-class retransforms (modded loaders widen future classes themselves)
             } catch(Throwable x){ LateAttachVerifier.error("TRANSFORM_FAILURE",n,"cft",rootMsg(x)); InjectionLogger.error("CFT fail "+n, x); }
             return null; } }, true);
         refreshLoadedAccessState(inst,aw);
@@ -270,12 +247,7 @@ public class FullInjectAgent {
     }
     /** define into the app loader with the given PD (matches signer of signed target packages); true on success or
      *  benign already-defined, false on a real ClassFormat/Verify defect. */
-    static boolean define(String dotted, byte[] b, ProtectionDomain pd){ try { defineClass5.invoke(SYS, dotted, b, 0, b.length, pd); return true; }
-        catch(Throwable t){ Throwable c=t.getCause()!=null?t.getCause():t;
-            String m=String.valueOf(c.getMessage());
-            if (m.contains("duplicate")) return true;                         // already defined -> fine
-            InjectionLogger.error("DEFINE-FAIL "+dotted+" -> "+c.getClass().getSimpleName()+": "+c.getMessage());
-            return false; } }
+    static boolean define(String dotted, byte[] b, ProtectionDomain pd){ return PLATFORM.defineClass(dotted, b, pd); }
     static synchronized boolean defineSynthetics(byte[] cb, ProtectionDomain pd){
         boolean ok=true;
         for(String in:scanSyn(cb)){
@@ -383,7 +355,14 @@ public class FullInjectAgent {
         waiter.setDaemon(true);
         waiter.start();
     }
-    static byte[] awApply(String n, byte[] b){ try { Object r = AW_APPLY.invoke(AW, n, b); return (byte[]) r; } catch(Throwable t){ return null; } }
+    static byte[] awApply(String n, byte[] b){ return PLATFORM.applyAw(n, b); }
+    /** Pick the platform by probing which loader owns the live client. Default vanilla; modded selects a stub host. */
+    static LoaderPlatform detectPlatform(Instrumentation inst) throws Exception {
+        if (loaderPresent(inst,"net.fabricmc.loader.impl.launch.knot.KnotClassLoader")) { InjectionLogger.info("detected Fabric (Knot) loader"); return new FabricPlatform(); }
+        if (loaderPresent(inst,"net.neoforged.fml.classloading.transformation.TransformingClassLoader")) { InjectionLogger.info("detected NeoForge (FML) loader"); return new NeoForgePlatform(); }
+        InjectionLogger.info("detected vanilla (system) loader"); return new VanillaPlatform();
+    }
+    static boolean loaderPresent(Instrumentation inst, String dotted){ for (Class<?> c : inst.getAllLoadedClasses()) if (c.getName().equals(dotted)) return true; return false; }
     static void verifyAsmRuntime() throws Exception {
         Class<?> opcodes=Class.forName("org.objectweb.asm.Opcodes",true,SYS);
         String version=opcodes.getPackage().getImplementationVersion();
