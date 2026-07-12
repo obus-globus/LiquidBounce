@@ -128,10 +128,11 @@ public class RetransformConverter {
         if (!reflectMethods.isEmpty()) addReflectMethodInit(S);
         r.notes.add("reflective (private @Shadow) methods: " + reflectMethods);
 
-        // Retransform must publish the loaded class's exact JVM-visible schema. Mixin can reorder overwritten methods
+        // Retransform must publish the loaded class's exact redefinition-constrained schema. Mixin can reorder overwritten methods
         // and @Mutable deliberately clears ACC_FINAL on @Shadow fields; both are useful while producing X but neither
         // is legal to publish over an already-loaded class. Put the surviving transformed members back in O's order
-        // and restore their original modifiers/structural attributes while retaining X's transformed method bodies.
+        // and restore their original modifiers/structural attributes while retaining X's transformed method bodies and
+        // supported class-file version (Mixin intentionally lifts older dependency classes to its compatibility level).
         restoreOriginalSchema(O, X);
         r.target = write(X, original);
         // emit sidecar + state as one combined verify pass isn't needed; caller defines both
@@ -147,14 +148,12 @@ public class RetransformConverter {
     public String stateName() { return stateName; }
 
     static void restoreOriginalSchema(ClassNode O, ClassNode X) {
-        if (O.version != X.version) throw schemaFailure(O.name, "class version changed from " + O.version + " to " + X.version);
         if (!Objects.equals(O.name, X.name)) throw schemaFailure(O.name, "class name changed to " + X.name);
         if (!Objects.equals(O.superName, X.superName)) throw schemaFailure(O.name, "superclass changed from " + O.superName + " to " + X.superName);
         int classKind = Opcodes.ACC_INTERFACE | Opcodes.ACC_ANNOTATION | Opcodes.ACC_ENUM | Opcodes.ACC_MODULE | Opcodes.ACC_RECORD;
         if (((O.access ^ X.access) & classKind) != 0) throw schemaFailure(O.name, "class kind modifiers changed");
         if (O.interfaces.size() != X.interfaces.size() || !new HashSet<>(O.interfaces).equals(new HashSet<>(X.interfaces)))
             throw schemaFailure(O.name, "original interface set changed from " + O.interfaces + " to " + X.interfaces);
-        X.version = O.version;
         X.access = O.access;
         X.name = O.name;
         X.signature = O.signature;
