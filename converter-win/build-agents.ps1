@@ -94,7 +94,21 @@ if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'jar (joinserver) failed' }
 Pop-Location
 Write-Host '[build] joinserver.jar OK'
 
-# --- 5. guimsgprobe.jar -----------------------------------------------------------------------------------
+# --- 5. openinventory.jar ---------------------------------------------------------------------------------
+$OiDir = Join-Path $Repo 'build\openinventory'
+New-Item -ItemType Directory -Force $OiDir | Out-Null
+& "$Jdk\javac.exe" --release 25 -d $OiDir (Join-Path $Src 'OpenInventory.java')
+if ($LASTEXITCODE -ne 0) { throw 'javac (OpenInventory) failed' }
+@'
+Agent-Class: OpenInventory
+'@ | Set-Content -Path (Join-Path $OiDir 'manifest.txt') -Encoding ascii
+Push-Location $OiDir
+& "$Jdk\jar.exe" cfm openinventory.jar manifest.txt OpenInventory.class
+if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'jar (openinventory) failed' }
+Pop-Location
+Write-Host '[build] openinventory.jar OK'
+
+# --- 6. guimsgprobe.jar -----------------------------------------------------------------------------------
 $PrDir = Join-Path $Repo 'build\guimsgprobe'
 New-Item -ItemType Directory -Force $PrDir | Out-Null
 & "$Jdk\javac.exe" --release 25 -d $PrDir (Join-Path $Src 'GuiMsgProbe.java')
