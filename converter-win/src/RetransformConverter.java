@@ -52,6 +52,7 @@ public class RetransformConverter {
     final Map<String,Integer> oMethodAcc = new HashMap<>();    // original "name desc" -> access
     final LinkedHashSet<String> reflectMethods = new LinkedHashSet<>(); // "name desc" of private target methods called from sidecar
     final Set<String> reflectStaticMethods = new HashSet<>();  // subset of reflectMethods invoked without a receiver
+    final LinkedHashMap<String,Object[]> ifaceDispatchTramps = new LinkedHashMap<>();
 
     Result run(byte[] original, byte[] transformed) {
         ClassNode O = read(original), X = read(transformed);
@@ -114,6 +115,10 @@ public class RetransformConverter {
         X.fields.removeIf(f -> addedFieldKeys.contains(f.name + " " + f.desc));
         X.methods.removeIf(m -> addedMethodKeys.contains(m.name + " " + m.desc));
         for (MethodNode m : X.methods) rewriteRefs(m, false);
+        for (var e : ifaceDispatchTramps.entrySet()) {
+            Object[] v = e.getValue();
+            S.methods.add(buildIfaceDispatchTramp(e.getKey(), (String)v[0], (String)v[1], (String)v[2]));
+        }
         // B: generate reflective accessors in the sidecar for every non-public target field we rewrote
         for (String key : reflectFields) { String nm = key.substring(0, key.indexOf(' ')), dc = key.substring(key.indexOf(' ') + 1); addReflectiveAccessors(S, nm, dc); }
         if (!reflectFields.isEmpty()) addReflectInit(S);
@@ -164,7 +169,8 @@ public class RetransformConverter {
     }
     void addGetState(ClassNode S) {
         // static State getState(Target self){ return (State) STATE.computeIfAbsent(self, k -> new State()); }
-        MethodNode g = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "getState", "(" + targetDesc + ")L" + stateName + ";", null, null);
+        MethodNode g = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_SYNCHRONIZED,
+            "getState", "(" + targetDesc + ")L" + stateName + ";", null, null);
         InsnList in = g.instructions;
         in.add(new FieldInsnNode(Opcodes.GETSTATIC, sidecar, "STATE", "Ljava/util/Map;"));
         in.add(new VarInsnNode(Opcodes.ALOAD, 0));
@@ -265,14 +271,15 @@ public class RetransformConverter {
     /** GLOBAL table of mixin-ADDED methods across ALL targets, keyed by "owner name desc" -> [owner, sidecar,
      *  isStatic]. Keyed by OWNER (not just name+desc) because the same handler name+desc can be added to multiple
      *  targets; a call is resolved by walking the receiver's class hierarchy to the declaring target. */
-    public static Map<String,String[]> GADDED, GFIELD, GIFACE;
+    public static Map<String,String[]> GADDED, GFIELD;
+    public static Map<String,List<String[]>> GIFACE;
     String[] addedFieldTarget(String owner, String name, String desc) {
         if (GFIELD == null) return null;
         for (String c = owner; c != null && !c.equals("java/lang/Object"); c = superOf(c)) { String[] g = GFIELD.get(gkey(c, name, desc)); if (g != null) return g; }
         return null;
     }
     static String gkey(String owner, String name, String desc) { return owner + " " + name + " " + desc; }
-    public static void collectAdded(String internal, byte[] O, byte[] X, Map<String,String[]> gMethods, Map<String,String[]> gFields, Map<String,String[]> gIfaces) {
+    public static void collectAdded(String internal, byte[] O, byte[] X, Map<String,String[]> gMethods, Map<String,String[]> gFields, Map<String,List<String[]>> gIfaces) {
         ClassNode o = read(O), x = read(X); Set<String> om = keysM(o), of = keysF(o);
         String sc = internal + "$$LBSidecar";
         for (MethodNode m : x.methods) { String k = m.name + " " + m.desc;
@@ -280,7 +287,12 @@ public class RetransformConverter {
                 gMethods.put(gkey(internal, m.name, m.desc), new String[]{internal, sc, (m.access & Opcodes.ACC_STATIC) != 0 ? "1" : "0"}); }
         for (FieldNode f : x.fields) { if (!of.contains(f.name + " " + f.desc))
             gFields.put(gkey(internal, f.name, f.desc), new String[]{internal, sc, (f.access & Opcodes.ACC_STATIC) != 0 ? "S" : "I"}); }
-        for (String i : x.interfaces) if (!o.interfaces.contains(i)) gIfaces.put(i, new String[]{internal, sc});
+        for (String i : x.interfaces) if (!o.interfaces.contains(i)) {
+            List<String[]> impls = gIfaces.computeIfAbsent(i, k -> new ArrayList<>());
+            boolean duplicate = false;
+            for (String[] impl : impls) if (impl[0].equals(internal)) { duplicate = true; break; }
+            if (!duplicate) impls.add(new String[]{internal, sc});
+        }
     }
     /** resolve a call to a mixin-added method: walk the receiver type's hierarchy to the target that declared it. */
     String[] addedCall(String owner, String name, String desc, boolean callStatic) {
@@ -299,11 +311,32 @@ public class RetransformConverter {
         if (m.instructions == null) return;
         for (AbstractInsnNode p = m.instructions.getFirst(), next; p != null; p = next) {
             next = p.getNext();   // capture BEFORE any set() detaches p (else iteration stops after one rewrite)
-            if (GIFACE != null && p instanceof TypeInsnNode gti && gti.getOpcode() == Opcodes.CHECKCAST && GIFACE.containsKey(gti.desc)) {
-                gti.desc = GIFACE.get(gti.desc)[0];   // CHECKCAST addedIface -> CHECKCAST target (receiver is really the target)
+            if (GIFACE != null && p instanceof TypeInsnNode gti && GIFACE.containsKey(gti.desc)
+                    && (gti.getOpcode() == Opcodes.CHECKCAST || gti.getOpcode() == Opcodes.INSTANCEOF)) {
+                List<String[]> impls = GIFACE.get(gti.desc);
+                if (impls.size() == 1) {
+                    gti.desc = impls.get(0)[0];
+                } else if (gti.getOpcode() == Opcodes.CHECKCAST) {
+                    InsnList suffix = new InsnList(); suffix.add(new LdcInsnNode(gti.desc));
+                    suffix.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "lbrt/DuckDispatch", "cast",
+                        "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false));
+                    m.instructions.insertBefore(gti, suffix); m.instructions.remove(gti);
+                } else {
+                    InsnList suffix = new InsnList(); suffix.add(new LdcInsnNode(gti.desc));
+                    suffix.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "lbrt/DuckDispatch", "isInstance", "(Ljava/lang/Object;Ljava/lang/String;)Z", false));
+                    m.instructions.insertBefore(gti, suffix); m.instructions.remove(gti);
+                }
             } else if (GIFACE != null && p instanceof MethodInsnNode gmi && gmi.getOpcode() == Opcodes.INVOKEINTERFACE && GIFACE.containsKey(gmi.owner)) {
-                String[] ts = GIFACE.get(gmi.owner);
-                m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, ts[1], "h$" + gmi.name, "(L" + ts[0] + ";" + gmi.desc.substring(1), false));
+                List<String[]> impls = GIFACE.get(gmi.owner);
+                if (impls.size() == 1) {
+                    String[] ts = impls.get(0);
+                    m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, ts[1], "h$" + gmi.name, "(L" + ts[0] + ";" + gmi.desc.substring(1), false));
+                } else {
+                    String tn = ifaceTrampName(gmi.owner, gmi.name, gmi.desc);
+                    ifaceDispatchTramps.putIfAbsent(tn, new Object[]{gmi.owner, gmi.name, gmi.desc});
+                    m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, tn,
+                        "(Ljava/lang/Object;" + gmi.desc.substring(1), false));
+                }
             } else if (p instanceof FieldInsnNode fi && addedFieldTarget(fi.owner, fi.name, fi.desc) != null) {
                 // mixin-ADDED field (relocated). GFIELD spans all targets so a base-class @Unique field accessed via a
                 // subclass receiver routes to the BASE target's sidecar accessor/static.
@@ -488,25 +521,87 @@ public class RetransformConverter {
     static String unboxMethod(Type t) { switch (t.getSort()) { case Type.BOOLEAN: return "booleanValue"; case Type.BYTE: return "byteValue"; case Type.CHAR: return "charValue"; case Type.SHORT: return "shortValue"; case Type.INT: return "intValue"; case Type.LONG: return "longValue"; case Type.FLOAT: return "floatValue"; default: return "doubleValue"; } }
     static void loadClassConst(InsnList in, Type t) { if (t.getSort() <= Type.DOUBLE) in.add(new FieldInsnNode(Opcodes.GETSTATIC, boxOwner(t), "TYPE", "Ljava/lang/Class;")); else in.add(new LdcInsnNode(t)); }
 
-    /** Build-time LB-caller rewrite: ((Iface)o).m(args) -> Sidecar.h$m((Target)o, args), for interfaces the
-     *  converter dropped from their target. ifaceMap: ifaceInternal -> [targetInternal, sidecarInternal]. */
-    public static byte[] rewriteCaller(byte[] callerBytes, Map<String,String[]> ifaceMap) {
+    static String ifaceTrampName(String iface, String name, String desc) {
+        return "ifd$" + name.replace('<','_').replace('>','_') + "__" + Integer.toHexString((iface + name + desc).hashCode() & 0xffffff);
+    }
+
+    static MethodNode buildIfaceDispatchTramp(String trampName, String iface, String name, String desc) {
+        Type[] at = Type.getArgumentTypes(desc); Type rt = Type.getReturnType(desc);
+        String td = "(Ljava/lang/Object;" + desc.substring(1);
+        MethodNode m = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, trampName, td, null, null);
+        InsnList in = m.instructions;
+        in.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        in.add(new LdcInsnNode(iface)); in.add(new LdcInsnNode(name)); in.add(new LdcInsnNode(desc));
+        in.add(intConst(at.length)); in.add(new TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Object"));
+        int slot = 1;
+        for (int i = 0; i < at.length; i++) {
+            in.add(new InsnNode(Opcodes.DUP)); in.add(intConst(i));
+            in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ILOAD), slot)); box(in, at[i]);
+            in.add(new InsnNode(Opcodes.AASTORE)); slot += at[i].getSize();
+        }
+        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "lbrt/DuckDispatch", "invoke",
+            "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;", false));
+        emitReturn(in, rt);
+        m.maxStack = 8 + at.length; m.maxLocals = slot;
+        return m;
+    }
+
+    /** Schema-neutral LB-caller rewrite for interfaces dropped from already-loaded targets. */
+    public static byte[] rewriteCaller(byte[] callerBytes, Map<String,List<String[]>> ifaceMap) {
         ClassNode c = read(callerBytes); int n = 0;
         for (MethodNode m : c.methods) {
             if (m.instructions == null) continue;
             for (AbstractInsnNode p = m.instructions.getFirst(), nx; p != null; p = nx) {
                 nx = p.getNext();
-                if (p instanceof TypeInsnNode ti && ti.getOpcode() == Opcodes.CHECKCAST && ifaceMap.containsKey(ti.desc)) {
-                    ti.desc = ifaceMap.get(ti.desc)[0];     // CHECKCAST Iface -> CHECKCAST Target (o is really the target)
+                if (p instanceof TypeInsnNode ti && ifaceMap.containsKey(ti.desc)
+                        && (ti.getOpcode() == Opcodes.CHECKCAST || ti.getOpcode() == Opcodes.INSTANCEOF)) {
+                    String iface = ti.desc; List<String[]> impls = ifaceMap.get(iface);
+                    if (impls.size() == 1) ti.desc = impls.get(0)[0];
+                    else if (ti.getOpcode() == Opcodes.CHECKCAST) {
+                        InsnList call = new InsnList(); call.add(new LdcInsnNode(iface));
+                        call.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "lbrt/DuckDispatch", "cast",
+                            "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false));
+                        m.instructions.insertBefore(ti, call); m.instructions.remove(ti);
+                    }
+                    else {
+                        InsnList call = new InsnList(); call.add(new LdcInsnNode(iface));
+                        call.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "lbrt/DuckDispatch", "isInstance", "(Ljava/lang/Object;Ljava/lang/String;)Z", false));
+                        m.instructions.insertBefore(ti, call); m.instructions.remove(ti);
+                    }
                     n++;
                 } else if (p instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKEINTERFACE && ifaceMap.containsKey(mi.owner)) {
-                    String[] ts = ifaceMap.get(mi.owner);
-                    m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, ts[1], "h$" + mi.name, "(L" + ts[0] + ";" + mi.desc.substring(1), false));
+                    List<String[]> impls = ifaceMap.get(mi.owner);
+                    if (impls.size() == 1) {
+                        String[] ts = impls.get(0);
+                        m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, ts[1], "h$" + mi.name, "(L" + ts[0] + ";" + mi.desc.substring(1), false));
+                    } else {
+                        rewriteDuckInvokeInline(m, mi);
+                    }
                     n++;
                 }
             }
         }
         return n == 0 ? callerBytes : write(c, callerBytes);
+    }
+
+    /** Spill an interface invocation to fresh locals and call the generic dispatcher without adding a helper method. */
+    static void rewriteDuckInvokeInline(MethodNode m, MethodInsnNode mi) {
+        Type[] at = Type.getArgumentTypes(mi.desc); Type rt = Type.getReturnType(mi.desc);
+        int next = m.maxLocals, receiver = next++;
+        int[] slots = new int[at.length];
+        for (int i=0;i<at.length;i++){slots[i]=next;next+=at[i].getSize();}
+        InsnList in = new InsnList();
+        for (int i=at.length-1;i>=0;i--) in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ISTORE),slots[i]));
+        in.add(new VarInsnNode(Opcodes.ASTORE,receiver));
+        in.add(new VarInsnNode(Opcodes.ALOAD,receiver));
+        in.add(new LdcInsnNode(mi.owner)); in.add(new LdcInsnNode(mi.name)); in.add(new LdcInsnNode(mi.desc));
+        in.add(intConst(at.length)); in.add(new TypeInsnNode(Opcodes.ANEWARRAY,"java/lang/Object"));
+        for(int i=0;i<at.length;i++){in.add(new InsnNode(Opcodes.DUP));in.add(intConst(i));
+            in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ILOAD),slots[i]));box(in,at[i]);in.add(new InsnNode(Opcodes.AASTORE));}
+        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC,"lbrt/DuckDispatch","invoke",
+            "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;",false));
+        adaptInlineResult(in,rt,false);
+        m.instructions.insertBefore(mi,in);m.instructions.remove(mi);m.maxLocals=Math.max(m.maxLocals,next);
     }
 
     /** Decides whether an LB access of an MC member must be reflection-routed, and which MC types are inaccessible
@@ -525,57 +620,81 @@ public class RetransformConverter {
      *  AccessWidener on-load, so their members stay direct (Resolver returns false for them). */
     public static synchronized byte[] rewriteLbAw(byte[] lbBytes, Resolver r) {
         RES = r;
-        ClassNode c = read(lbBytes);
-        boolean[] changed = {false};
-        LinkedHashMap<String,Object[]> tramps = new LinkedHashMap<>();   // trampName -> {owner,name,desc,isStatic|null=ctor}
-        for (MethodNode m : c.methods) {
-            if (m.instructions == null) continue;
-            for (AbstractInsnNode p = m.instructions.getFirst(), nx; p != null; p = nx) {
-                nx = p.getNext();
-                if (p instanceof FieldInsnNode fi && r.fieldNeedsReflect(fi.owner, fi.name, fi.desc)) {
-                    rewriteFieldAw(m, fi); changed[0] = true;
-                } else if (p instanceof MethodInsnNode ci && ci.getOpcode() == Opcodes.INVOKESPECIAL && ci.name.equals("<init>")
-                        && r.methodNeedsReflect(ci.owner, ci.name, ci.desc)) {
-                    AbstractInsnNode nw = ci.getPrevious();
-                    while (nw != null && !(nw instanceof TypeInsnNode tn && tn.getOpcode() == Opcodes.NEW && tn.desc.equals(ci.owner))) nw = nw.getPrevious();
-                    if (nw != null && nw.getNext() != null && nw.getNext().getOpcode() == Opcodes.DUP) {
-                        AbstractInsnNode dup = nw.getNext();
-                        String tn = "awn$" + Integer.toHexString((ci.owner + ci.desc).hashCode() & 0xffffff);
-                        tramps.putIfAbsent(tn, new Object[]{ci.owner, "<init>", ci.desc, null});
-                        m.instructions.remove(nw); m.instructions.remove(dup);
-                        String rt = r.typeInaccessible(ci.owner) ? "Ljava/lang/Object;" : "L" + ci.owner + ";";
-                        m.instructions.set(ci, new MethodInsnNode(Opcodes.INVOKESTATIC, c.name, tn, "(" + ci.desc.substring(1, ci.desc.length()-1) + rt, false));
+        try {
+            ClassNode c = read(lbBytes);
+            boolean[] changed = {false};
+            for (MethodNode m : c.methods) {
+                if (m.instructions == null) continue;
+                for (AbstractInsnNode p = m.instructions.getFirst(), nx; p != null; p = nx) {
+                    nx = p.getNext();
+                    if (p instanceof FieldInsnNode fi && r.fieldNeedsReflect(fi.owner, fi.name, fi.desc)) {
+                        rewriteFieldAw(m, fi); changed[0] = true;
+                    } else if (p instanceof MethodInsnNode ci && ci.getOpcode() == Opcodes.INVOKESPECIAL && ci.name.equals("<init>")
+                            && r.methodNeedsReflect(ci.owner, ci.name, ci.desc)) {
+                        AbstractInsnNode nw = ci.getPrevious();
+                        while (nw != null && !(nw instanceof TypeInsnNode tn && tn.getOpcode() == Opcodes.NEW && tn.desc.equals(ci.owner))) nw = nw.getPrevious();
+                        if (nw != null && nw.getNext() != null && nw.getNext().getOpcode() == Opcodes.DUP) {
+                            AbstractInsnNode dup = nw.getNext();
+                            m.instructions.remove(nw); m.instructions.remove(dup);
+                            rewriteAwCtorInline(m,ci); changed[0] = true;
+                        }
+                    } else if (p instanceof MethodInsnNode mi && mi.name.charAt(0) != '<'
+                            && (mi.getOpcode() == Opcodes.INVOKEVIRTUAL || mi.getOpcode() == Opcodes.INVOKESTATIC || mi.getOpcode() == Opcodes.INVOKESPECIAL)
+                            && r.methodNeedsReflect(mi.owner, mi.name, mi.desc)) {
+                        rewriteAwMethodInline(m,mi); changed[0] = true;
+                    } else if (p instanceof TypeInsnNode ti && ti.getOpcode() == Opcodes.CHECKCAST
+                            && ti.desc.charAt(0) != '[' && r.typeInaccessible(ti.desc)) {
+                        m.instructions.remove(p);   // erase CHECKCAST to an inaccessible type (value flows as Object)
                         changed[0] = true;
                     }
-                } else if (p instanceof MethodInsnNode mi && mi.name.charAt(0) != '<'
-                        && (mi.getOpcode() == Opcodes.INVOKEVIRTUAL || mi.getOpcode() == Opcodes.INVOKESTATIC || mi.getOpcode() == Opcodes.INVOKESPECIAL)
-                        && r.methodNeedsReflect(mi.owner, mi.name, mi.desc)) {
-                    boolean isStatic = mi.getOpcode() == Opcodes.INVOKESTATIC;
-                    String tn = "awm$" + mi.name + "__" + Integer.toHexString((mi.owner + mi.name + mi.desc).hashCode() & 0xffffff);
-                    tramps.putIfAbsent(tn, new Object[]{mi.owner, mi.name, mi.desc, isStatic});
-                    String td = isStatic ? erasedDesc(mi.desc) : "(" + selfDesc(mi.owner) + erasedDesc(mi.desc).substring(1);
-                    m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, c.name, tn, td, false));
-                    changed[0] = true;
-                } else if (p instanceof TypeInsnNode ti && ti.getOpcode() == Opcodes.CHECKCAST
-                        && ti.desc.charAt(0) != '[' && r.typeInaccessible(ti.desc)) {
-                    m.instructions.remove(p);   // erase CHECKCAST to an inaccessible type (value flows as Object)
-                    changed[0] = true;
                 }
             }
+            return changed[0] ? write(c, lbBytes) : lbBytes;
+        } finally {
+            RES = null;
         }
-        for (var e : tramps.entrySet()) { Object[] v = e.getValue();
-            if (v[3] == null) c.methods.add(buildAwCtorTramp(e.getKey(), (String) v[0], (String) v[2]));
-            else c.methods.add(buildAwMethodTramp(e.getKey(), (String) v[0], (String) v[1], (String) v[2], (Boolean) v[3])); }
-        return changed[0] ? write(c, lbBytes) : lbBytes;
     }
-    /** descriptor to use in LB bytecode for a value of type t: erase inaccessible object types to Object. */
-    static String pubDesc(Type t) { return (t.getSort() == Type.OBJECT && RES != null && RES.typeInaccessible(t.getInternalName())) ? "Ljava/lang/Object;" : t.getDescriptor(); }
-    static String selfDesc(String owner) { return (RES != null && RES.typeInaccessible(owner)) ? "Ljava/lang/Object;" : "L" + owner + ";"; }
-    static String erasedDesc(String desc) { StringBuilder b = new StringBuilder("("); for (Type a : Type.getArgumentTypes(desc)) b.append(pubDesc(a)); b.append(")"); Type rt = Type.getReturnType(desc); b.append(rt.getSort() == Type.VOID ? "V" : pubDesc(rt)); return b.toString(); }
+
+    static void rewriteAwMethodInline(MethodNode m, MethodInsnNode mi) {
+        boolean isStatic=mi.getOpcode()==Opcodes.INVOKESTATIC;
+        Type[] at=Type.getArgumentTypes(mi.desc);Type rt=Type.getReturnType(mi.desc);
+        int next=m.maxLocals,receiver=isStatic?-1:next++;
+        int[] slots=new int[at.length];for(int i=0;i<at.length;i++){slots[i]=next;next+=at[i].getSize();}
+        InsnList in=new InsnList();
+        for(int i=at.length-1;i>=0;i--)in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ISTORE),slots[i]));
+        if(!isStatic)in.add(new VarInsnNode(Opcodes.ASTORE,receiver));
+        in.add(new LdcInsnNode(mi.owner));in.add(new LdcInsnNode(mi.name));pushStrArray(in,at);
+        in.add(new LdcInsnNode(mi.owner+"#"+mi.name+mi.desc));
+        if(isStatic)in.add(new InsnNode(Opcodes.ACONST_NULL));else in.add(new VarInsnNode(Opcodes.ALOAD,receiver));
+        pushObjectArgs(in,at,slots);
+        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC,AWR,"inv",
+            "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;",false));
+        adaptInlineResult(in,rt,true);
+        m.instructions.insertBefore(mi,in);m.instructions.remove(mi);m.maxLocals=Math.max(m.maxLocals,next);
+    }
+
+    static void rewriteAwCtorInline(MethodNode m, MethodInsnNode ci) {
+        Type[] at=Type.getArgumentTypes(ci.desc);int next=m.maxLocals;int[] slots=new int[at.length];
+        for(int i=0;i<at.length;i++){slots[i]=next;next+=at[i].getSize();}
+        InsnList in=new InsnList();for(int i=at.length-1;i>=0;i--)in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ISTORE),slots[i]));
+        in.add(new LdcInsnNode(ci.owner));pushStrArray(in,at);in.add(new LdcInsnNode(ci.owner+"#<init>"+ci.desc));pushObjectArgs(in,at,slots);
+        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC,AWR,"newInst",
+            "(Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;",false));
+        if(RES==null||!RES.typeInaccessible(ci.owner))in.add(new TypeInsnNode(Opcodes.CHECKCAST,ci.owner));
+        m.instructions.insertBefore(ci,in);m.instructions.remove(ci);m.maxLocals=Math.max(m.maxLocals,next);
+    }
+
+    static void pushObjectArgs(InsnList in,Type[] at,int[] slots){in.add(intConst(at.length));in.add(new TypeInsnNode(Opcodes.ANEWARRAY,"java/lang/Object"));
+        for(int i=0;i<at.length;i++){in.add(new InsnNode(Opcodes.DUP));in.add(intConst(i));in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ILOAD),slots[i]));box(in,at[i]);in.add(new InsnNode(Opcodes.AASTORE));}}
+
+    static void adaptInlineResult(InsnList in,Type rt,boolean eraseInaccessible){
+        if(rt.getSort()==Type.VOID){in.add(new InsnNode(Opcodes.POP));return;}
+        if(rt.getSort()<=Type.DOUBLE){unbox(in,rt);return;}
+        if(rt.getSort()==Type.ARRAY)in.add(new TypeInsnNode(Opcodes.CHECKCAST,rt.getDescriptor()));
+        else if(!eraseInaccessible||RES==null||!RES.typeInaccessible(rt.getInternalName()))in.add(new TypeInsnNode(Opcodes.CHECKCAST,rt.getInternalName()));
+    }
     /** internal name (object) or descriptor (array/primitive) as a STRING to hand AwReflect for Class.forName. */
     static String typeName(Type t) { return t.getSort() == Type.OBJECT ? t.getInternalName() : t.getDescriptor(); }
-    static final Type OBJECT_TYPE = Type.getObjectType("java/lang/Object");
-    static Type erasedType(Type t) { return (t.getSort() == Type.OBJECT && RES != null && RES.typeInaccessible(t.getInternalName())) ? OBJECT_TYPE : t; }
     static void rewriteFieldAw(MethodNode m, FieldInsnNode fi) {
         Type ft = Type.getType(fi.desc); String sfx = awSfx(ft);
         String valDesc = ft.getSort() <= Type.DOUBLE ? ft.getDescriptor() : "Ljava/lang/Object;";
@@ -601,50 +720,17 @@ public class RetransformConverter {
     }
     static String awSfx(Type t) { switch (t.getSort()) { case Type.INT: return "I"; case Type.LONG: return "J"; case Type.BOOLEAN: return "Z"; case Type.FLOAT: return "F"; case Type.DOUBLE: return "D"; case Type.BYTE: return "B"; case Type.SHORT: return "S"; case Type.CHAR: return "C"; default: return "O"; } }
     static void pushStrArray(InsnList in, Type[] at) { in.add(intConst(at.length)); in.add(new TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/String")); for (int i = 0; i < at.length; i++) { in.add(new InsnNode(Opcodes.DUP)); in.add(intConst(i)); in.add(new LdcInsnNode(typeName(at[i]))); in.add(new InsnNode(Opcodes.AASTORE)); } }
-    static MethodNode buildAwMethodTramp(String tname, String owner, String name, String desc, boolean isStatic) {
-        Type[] at = Type.getArgumentTypes(desc); Type rt = Type.getReturnType(desc);
-        String td = isStatic ? erasedDesc(desc) : "(" + selfDesc(owner) + erasedDesc(desc).substring(1);
-        MethodNode m = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, tname, td, null, null);
-        InsnList in = m.instructions;
-        in.add(new LdcInsnNode(owner));                              // String owner
-        in.add(new LdcInsnNode(name));                               // String name
-        pushStrArray(in, at);                                        // String[] paramTypes (real types)
-        in.add(new LdcInsnNode(owner + "#" + name + desc));          // key
-        if (isStatic) in.add(new InsnNode(Opcodes.ACONST_NULL)); else in.add(new VarInsnNode(Opcodes.ALOAD, 0));  // target (self at slot 0)
-        in.add(intConst(at.length)); in.add(new TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Object"));
-        int slot = isStatic ? 0 : 1;   // args follow self
-        for (int i = 0; i < at.length; i++) { Type et = erasedType(at[i]); in.add(new InsnNode(Opcodes.DUP)); in.add(intConst(i)); in.add(new VarInsnNode(et.getOpcode(Opcodes.ILOAD), slot)); box(in, et); in.add(new InsnNode(Opcodes.AASTORE)); slot += et.getSize(); }
-        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, AWR, "inv", "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false));
-        emitReturn(in, rt);
-        m.maxStack = 8 + at.length; m.maxLocals = slot; return m;
-    }
-    static MethodNode buildAwCtorTramp(String tname, String owner, String desc) {
-        Type[] at = Type.getArgumentTypes(desc);
-        String edesc = erasedDesc(desc);
-        String td = "(" + edesc.substring(1, edesc.length() - 1) + selfDesc(owner);   // (args)Lowner|Object;
-        MethodNode m = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, tname, td, null, null);
-        InsnList in = m.instructions;
-        in.add(new LdcInsnNode(owner));
-        pushStrArray(in, at);
-        in.add(new LdcInsnNode(owner + "#<init>" + desc));
-        in.add(intConst(at.length)); in.add(new TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Object"));
-        int slot = 0;
-        for (int i = 0; i < at.length; i++) { Type et = erasedType(at[i]); in.add(new InsnNode(Opcodes.DUP)); in.add(intConst(i)); in.add(new VarInsnNode(et.getOpcode(Opcodes.ILOAD), slot)); box(in, et); in.add(new InsnNode(Opcodes.AASTORE)); slot += et.getSize(); }
-        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, AWR, "newInst", "(Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;", false));
-        if (!RES.typeInaccessible(owner)) in.add(new TypeInsnNode(Opcodes.CHECKCAST, owner));
-        in.add(new InsnNode(Opcodes.ARETURN));
-        m.maxStack = 8 + at.length; m.maxLocals = slot; return m;
-    }
     static void emitReturn(InsnList in, Type rt) {
         if (rt.getSort() == Type.VOID) { in.add(new InsnNode(Opcodes.POP)); in.add(new InsnNode(Opcodes.RETURN)); }
         else if (rt.getSort() <= Type.DOUBLE) { unbox(in, rt); in.add(new InsnNode(rt.getOpcode(Opcodes.IRETURN))); }
         else if (rt.getSort() == Type.ARRAY) { in.add(new TypeInsnNode(Opcodes.CHECKCAST, rt.getDescriptor())); in.add(new InsnNode(Opcodes.ARETURN)); }
-        else if (RES != null && RES.typeInaccessible(rt.getInternalName())) { in.add(new InsnNode(Opcodes.ARETURN)); }   // leave as Object
         else { in.add(new TypeInsnNode(Opcodes.CHECKCAST, rt.getInternalName())); in.add(new InsnNode(Opcodes.ARETURN)); }
     }
 
     // ---- io ----
     static ClassNode read(byte[] b) { ClassReader r = new ClassReader(b); ClassNode n = new ClassNode(); r.accept(n, ClassReader.SKIP_FRAMES); return n; }
+    /** Re-emit a candidate using the JVM-supplied retransform buffer as the constant-pool basis. */
+    public static byte[] rebase(byte[] candidate, byte[] actualBaseline) { return write(read(candidate), actualBaseline); }
     /** reads class metadata (superName / interfaces / isInterface) WITHOUT loading the class; set by the agent. */
     public static java.util.function.Function<String,byte[]> CLASS_BYTES;
     /** [BUG22 FIX] When emitting a class that will be REDEFINED over an already-loaded original (target',

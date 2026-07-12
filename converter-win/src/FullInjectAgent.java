@@ -16,10 +16,11 @@ import vspike.VSpikeService;
  *  sidecars; then manually kick LB's ClientStartEvent so it initializes on the already-running game. */
 public class FullInjectAgent {
     static final ClassLoader SYS = ClassLoader.getSystemClassLoader();
+    static final boolean DEBUG = Boolean.getBoolean("lb.agent.debug");
     static IMixinTransformer tr; static MixinEnvironment env; static Method defineClass5;
     static final Set<String> definedSynth = ConcurrentHashMap.newKeySet();
     static final Map<String,Conv> convMap = new ConcurrentHashMap<>();             // internal -> conversion holder
-    static final Map<String,String[]> ifaceMap = new HashMap<>();                  // iface -> [target, sidecar]
+    static final Map<String,List<String[]>> ifaceMap = new HashMap<>();            // iface -> all [target, sidecar]
     static final Set<String> targetSet = new HashSet<>();                          // internal names of mixin targets
     static Instrumentation INST;
     static final Set<String> preLoaded = ConcurrentHashMap.newKeySet();            // MC classes loaded at attach (can't be AW-widened)
@@ -29,11 +30,13 @@ public class FullInjectAgent {
     static final Set<String> INACC = ConcurrentHashMap.newKeySet();                // already-loaded package-private MC classes LB references by type
     /** per-target conversion: target' bytes + sidecar/state (defined LAZILY in the CFT with the target's real PD). */
     static final class Conv { byte[] target, sidecar, state; String sidecarName, stateName; volatile boolean defined;
-        byte[] define(ProtectionDomain pd){ synchronized(this){ if(defined) return target;
+        boolean define(ProtectionDomain pd){ synchronized(this){ if(defined) return true;
             boolean ok = defineSynthetics(target, pd) & defineSynthetics(sidecar, pd)
                        & FullInjectAgent.define(stateName.replace('/','.'), state, pd)
                        & FullInjectAgent.define(sidecarName.replace('/','.'), sidecar, pd);
-            defined = true; if(!ok) System.out.println("[FULL] LATE define issue for "+sidecarName); return target; } } }
+            if(ok) defined=true;
+            else LateAttachVerifier.error("SIDECAR_DEFINE_FAILURE",sidecarName,"sidecar","One or more synthetic/state/sidecar definitions failed");
+            return ok; } } }
 
     public static void agentmain(String a, Instrumentation inst) throws Exception {
         INST = inst;
@@ -44,10 +47,19 @@ public class FullInjectAgent {
         System.out.println("[FULL] staging LB bundle onto system loader ("+preLoaded.size()+" classes already loaded)");
         File self = new File(FullInjectAgent.class.getProtectionDomain().getCodeSource().getLocation().toURI());
         Path tmp = Files.createTempDirectory("lb-full-"); tmp.toFile().deleteOnExit();
+        Path lbBundle = null;
         try (JarFile jf = new JarFile(self)) { for (var en = jf.entries(); en.hasMoreElements();) { JarEntry e = en.nextElement(); String n = e.getName();
-            if (n.equals("lbrt/AwReflect.class")) { byte[] b; try (InputStream in=jf.getInputStream(e)){ b=in.readAllBytes(); } define("lbrt.AwReflect", b, null); continue; }
+            if (n.equals("lbrt/AwReflect.class") || ((n.startsWith("lbrt/DuckDispatch") || n.startsWith("lbrt/JoinGate")) && n.endsWith(".class"))) {
+                byte[] b; try (InputStream in=jf.getInputStream(e)){ b=in.readAllBytes(); }
+                if(!define(n.substring(0, n.length()-6).replace('/','.'), b, null))
+                    throw new IllegalStateException("Cannot stage runtime class "+n);
+                continue;
+            }
             if (!n.startsWith("agent-libs/") || !n.endsWith(".jar")) continue; Path o = tmp.resolve(new File(n).getName());
-            try (InputStream in = jf.getInputStream(e)) { Files.copy(in, o, StandardCopyOption.REPLACE_EXISTING); } inst.appendToSystemClassLoaderSearch(new JarFile(o.toFile())); } }
+            try (InputStream in = jf.getInputStream(e)) { Files.copy(in, o, StandardCopyOption.REPLACE_EXISTING); }
+            if(n.equals("agent-libs/liquidbounce.jar"))lbBundle=o;
+            inst.appendToSystemClassLoaderSearch(new JarFile(o.toFile())); } }
+        if(lbBundle==null)throw new IllegalStateException("Bundled liquidbounce.jar not found");
         Thread.currentThread().setContextClassLoader(SYS);
         try { Class.forName("vspike.McefNative").getMethod("stageIfBundled", File.class, String.class).invoke(null, self, "[FULL]"); } catch (Throwable t) {}
 
@@ -76,41 +88,58 @@ public class FullInjectAgent {
         try (var r = new BufferedReader(new InputStreamReader(SYS.getResourceAsStream("lb-mixin-targets.txt")))) { String l; while ((l=r.readLine())!=null) if(!l.isBlank()) targets.add(l.trim().replace('.','/')); }
         targetSet.addAll(targets);
 
-        // pass 1: convert every target we can read bytes for -> cache target' + build ifaceMap + define sidecars/synthetics.
-        // ROBUST: a target is only accepted (put into convertedTarget) if its state+sidecar+synthetics all DEFINE cleanly;
-        // otherwise it is skipped (original class left intact) so one bad conversion degrades to "that mixin absent",
-        // never a game crash from a target' that calls a sidecar that failed to define.
+        // Convert transactionally. Nothing is published/defined until every transformed target verifies, because the
+        // global relocation tables permit cross-target sidecar calls and therefore cannot be safely partially accepted.
         Map<String,Class<?>> loadedMap = new HashMap<>();
         for (Class<?> c : inst.getAllLoadedClasses()) loadedMap.put(c.getName().replace('.','/'), c);
         // [BUG22-DIAG] was GuiMessage already loaded when we attached? (suspected intermittency factor)
-        System.out.println("[DBG22] GuiMessage loadedAtAttach="+loadedMap.containsKey("net/minecraft/client/multiplayer/chat/GuiMessage")
+        if(DEBUG) System.out.println("[DBG22] GuiMessage loadedAtAttach="+loadedMap.containsKey("net/minecraft/client/multiplayer/chat/GuiMessage")
                 +" preLoaded="+preLoaded.contains("net/minecraft/client/multiplayer/chat/GuiMessage"));
-        ProtectionDomain mcPD = null; try { mcPD = Class.forName("net.minecraft.client.Minecraft", false, SYS).getProtectionDomain(); } catch(Throwable t){}
-        final ProtectionDomain refPD = mcPD;
         // Phase A: mixin-transform every target and collect the GLOBAL added-method table (so cross-target / base-class
         // @Unique calls route to the right sidecar during conversion).
         LinkedHashMap<String,byte[][]> txMap = new LinkedHashMap<>();
-        Map<String,String[]> gadded = new HashMap<>(); Map<String,String[]> gfield = new HashMap<>(); Map<String,String[]> giface = new HashMap<>();
+        Map<String,String[]> gadded = new HashMap<>(); Map<String,String[]> gfield = new HashMap<>(); Map<String,List<String[]>> giface = new HashMap<>();
+        List<String> phaseFailures = new ArrayList<>();
         for (String internal : targets) { try {
             byte[] O; try (InputStream in=SYS.getResourceAsStream(internal+".class")){ if(in==null) continue; O=in.readAllBytes(); }
             byte[] X = tr.transformClassBytes(internal.replace('/','.'), internal.replace('/','.'), O); if (X==null || Arrays.equals(X,O)) continue;
             txMap.put(internal, new byte[][]{O, X}); RetransformConverter.collectAdded(internal, O, X, gadded, gfield, giface);
-        } catch (Throwable e) { System.out.println("[FULL] transform skip "+internal+" -> "+rootMsg(e)); } }
+        } catch (Throwable e) { phaseFailures.add(internal); LateAttachVerifier.error("MIXIN_TRANSFORM_FAILURE",internal,"target",rootMsg(e)); System.out.println("[FULL] transform fail "+internal+" -> "+rootMsg(e)); } }
         RetransformConverter.GADDED = gadded; RetransformConverter.GFIELD = gfield; RetransformConverter.GIFACE = giface;
         System.out.println("[FULL] phase A: "+txMap.size()+" transformed; global added-methods="+gadded.size()+" added-fields="+gfield.size());
-        // Phase B: convert each (rewriteRefs now consults GADDED) + eager-define already-loaded sidecars.
+        // Phase B: stage every conversion against the complete global tables.
         int conv=0, eager=0; List<String> skipped=new ArrayList<>();
+        LinkedHashMap<String,Conv> pendingConv=new LinkedHashMap<>();
+        Map<String,List<String[]>> pendingIfaces=new HashMap<>();
         for (var e : txMap.entrySet()) { String internal = e.getKey(); try {
             byte[] O = e.getValue()[0], X = e.getValue()[1];
             RetransformConverter c = new RetransformConverter(internal); RetransformConverter.Result res = c.run(O, X);
             Conv cv = new Conv(); cv.target=res.target; cv.sidecar=res.sidecar; cv.state=c.stateBytes(); cv.sidecarName=res.sidecarName; cv.stateName=c.stateName();
-            for (String di : res.droppedInterfaces) ifaceMap.put(di, new String[]{internal, res.sidecarName});
-            convMap.put(internal, cv); conv++;
-            Class<?> lc = loadedMap.get(internal);
-            ProtectionDomain pd = lc != null ? lc.getProtectionDomain() : refPD;
-            if (pd != null) { cv.define(pd); eager++; }
-        } catch (Throwable ex) { skipped.add(internal); System.out.println("[FULL] convert skip "+internal+" -> "+rootMsg(ex)); } }
+            if (!LateAttachVerifier.verifyConversion(internal, O, cv.target, cv.sidecar, cv.state, gadded, gfield, giface)) {
+                skipped.add(internal); continue;
+            }
+            for (String di : res.droppedInterfaces) {
+                List<String[]> impls = pendingIfaces.computeIfAbsent(di, k -> new ArrayList<>());
+                boolean duplicate=false; for(String[] impl:impls) if(impl[0].equals(internal)){duplicate=true;break;}
+                if(!duplicate) impls.add(new String[]{internal, res.sidecarName});
+            }
+            pendingConv.put(internal, cv); conv++;
+        } catch (Throwable ex) { skipped.add(internal); LateAttachVerifier.error("CONVERSION_FAILURE",internal,"target",rootMsg(ex)); System.out.println("[FULL] convert fail "+internal+" -> "+rootMsg(ex)); } }
+        if(!phaseFailures.isEmpty()||!skipped.isEmpty()||LateAttachVerifier.hasErrors()){
+            LateAttachVerifier.writeReport();
+            throw new IllegalStateException("Late-attach conversion gate failed; no partial conversion was published");
+        }
+        convMap.putAll(pendingConv);ifaceMap.putAll(pendingIfaces);
+        // Eager-define only for targets that were already loaded, using that target's exact protection domain.
+        for(var e:pendingConv.entrySet()){Class<?> lc=loadedMap.get(e.getKey());if(lc==null)continue;
+            if(e.getValue().define(lc.getProtectionDomain()))eager++;}
+        if(LateAttachVerifier.hasErrors()){
+            LateAttachVerifier.writeReport();
+            throw new IllegalStateException("Late-attach sidecar definition gate failed");
+        }
         System.out.println("[FULL] converted "+conv+" targets ("+eager+" sidecars eager-defined); ifaceMap="+ifaceMap.size()+" interfaces; skipped="+skipped.size()+(skipped.isEmpty()?"":" "+skipped));
+        for (var ie : ifaceMap.entrySet()) for (String[] impl : ie.getValue())
+            lbrt.DuckDispatch.register(ie.getKey(), impl[0], impl[1]);
 
         // Resolver: LB access of a non-public member of an ALREADY-LOADED MC class must be reflection-routed (that
         // class could not be AW-widened, since retransform bans modifier changes). Future MC classes get the AW on-load.
@@ -127,31 +156,65 @@ public class FullInjectAgent {
             try {
                 // [BUG22-DIAG] log EVERY CFT sighting of GuiMessage (even if unconverted) with input byte identity
                 boolean g22 = n.equals("net/minecraft/client/multiplayer/chat/GuiMessage");
-                if (g22) System.out.println("[DBG22] CFT-in GuiMessage retransform="+(c!=null)+" conv="+convMap.containsKey(n)
+                boolean connect = n.equals(JoinGateRewriter.CONNECT_SCREEN);
+                if (DEBUG && g22) System.out.println("[DBG22] CFT-in GuiMessage retransform="+(c!=null)+" conv="+convMap.containsKey(n)
                         +" thread="+Thread.currentThread().getName()+" inBytes="+(b==null?-1:b.length)+" inSha="+sha(b)+" inFields="+fieldsOf(b));
                 Conv cv = convMap.get(n);
-                if (cv!=null) { byte[] t = cv.define(p); boolean awch=false; if (c==null) { byte[] w=awApply(n,t); if(w!=null){ awch=true; t=w; } }
-                    if (g22) { System.out.println("[DBG22] CFT-out GuiMessage retransform="+(c!=null)+" aw="+awch+" outBytes="+t.length+" outSha="+sha(t)+" outFields="+fieldsOf(t));
+                if (cv!=null) {
+                    byte[] t = c==null ? cv.target : RetransformConverter.rebase(cv.target, b);
+                    if(connect)t=JoinGateRewriter.rewrite(n,t);
+                    if (c!=null && !LateAttachVerifier.verifyRetransform(n, b, t)) return null;
+                    if(!cv.define(p))return null;
+                    boolean awch=false; if (c==null) { byte[] w=awApply(n,t); if(w!=null){ awch=true; t=w; } }
+                    if (DEBUG && g22) { System.out.println("[DBG22] CFT-out GuiMessage retransform="+(c!=null)+" aw="+awch+" outBytes="+t.length+" outSha="+sha(t)+" outFields="+fieldsOf(t));
                         try { java.nio.file.Files.write(java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "guimsg-cft-"+(c!=null?"rt":"load")+"-"+System.nanoTime()+".class"), t); } catch(Throwable x){ System.out.println("[DBG22] dump fail "+x); } }
                     return t; }
                 if (n.startsWith("net/ccbluex/")) {
-                    byte[] rw = n.equals("net/ccbluex/liquidbounce/utils/client/ChatHudExtensionKt")
-                        ? rewriteChatHudMessageSetters(b) : b;
+                    byte[] rw = AccessorBridgeRewriter.rewrite(n, b);
                     rw = ifaceMap.isEmpty()? rw : RetransformConverter.rewriteCaller(rw, ifaceMap);
                     rw = RetransformConverter.rewriteLbAw(rw, awRes);
-                    if (n.equals("net/ccbluex/liquidbounce/injection/mixins/minecraft/gui/MixinHudAccessor"))
-                        rw = rewriteHudStaticAccessors(rw);
+                    if (!LateAttachVerifier.verifyCaller(n, b, rw, gadded, gfield, ifaceMap)) return null;
                     return rw==b? null : rw;
                 }
+                if (connect) {
+                    byte[] rw=JoinGateRewriter.rewrite(n,b);
+                    if(c!=null&&!LateAttachVerifier.verifyRetransform(n,b,rw))return null;
+                    if(c==null){byte[] w=awApply(n,rw);if(w!=null)rw=w;}
+                    return rw==b?null:rw;
+                }
                 if (n.startsWith("net/minecraft/")||n.startsWith("com/mojang/")) return awApply(n,b);  // widen future MC classes (on-load) + AW-class retransforms
-            } catch(Throwable x){ System.out.println("[FULL] CFT fail "+n+" -> "+rootMsg(x)); }
+            } catch(Throwable x){ LateAttachVerifier.error("TRANSFORM_FAILURE",n,"cft",rootMsg(x)); System.out.println("[FULL] CFT fail "+n+" -> "+rootMsg(x)); }
             return null; } }, true);
+        refreshLoadedAccessState(inst,aw);
+
+        // Force the join entry point through the installed CFT now. A later first-click load is too late to prove that
+        // the gate exists before registries are thawed.
+        try{
+            boolean connectWasLoaded=preLoaded.contains(JoinGateRewriter.CONNECT_SCREEN);
+            Class<?> connectClass=Class.forName(JoinGateRewriter.CONNECT_SCREEN.replace('/','.'),false,SYS);
+            if(connectWasLoaded){
+                if(!inst.isModifiableClass(connectClass))throw new UnmodifiableClassException(connectClass.getName());
+                inst.retransformClasses(connectClass);
+            }
+        }catch(Throwable e){LateAttachVerifier.error("JOIN_GATE_PREFLIGHT_FAILURE",JoinGateRewriter.CONNECT_SCREEN,"join-gate",rootMsg(e));}
+        preflightLbClasses(lbBundle,awRes,gadded,gfield,ifaceMap);
+        if(LateAttachVerifier.hasErrors()){
+            LateAttachVerifier.writeReport();
+            throw new IllegalStateException("Late-attach preflight failed before target retransformation; see report");
+        }
 
         // retransform already-loaded mixin targets with their converted form (CFT defines their sidecar with the class PD)
-        int rt=0; for (Class<?> c : inst.getAllLoadedClasses()) { String in=c.getName().replace('.','/'); if (convMap.containsKey(in)) { try { inst.retransformClasses(c); rt++; } catch(Throwable e){ String det = e.getMessage(); Throwable cc=e; while(cc.getCause()!=null){cc=cc.getCause(); if(cc.getMessage()!=null) det=cc.getMessage();} System.out.println("[FULL] retransform fail "+in+" -> "+e.getClass().getSimpleName()+": "+(det==null?"":det.replace('\n',' ').substring(0,Math.min(det.length(),600)))); } } }
+        int rt=0; for (Class<?> c : inst.getAllLoadedClasses()) { String in=c.getName().replace('.','/');
+            if (convMap.containsKey(in)&&preLoaded.contains(in)&&!in.equals(JoinGateRewriter.CONNECT_SCREEN)) { try {
+            if(!inst.isModifiableClass(c))throw new UnmodifiableClassException(in);
+            inst.retransformClasses(c); rt++;
+        } catch(Throwable e){ String det = e.getMessage(); Throwable cc=e; while(cc.getCause()!=null){cc=cc.getCause(); if(cc.getMessage()!=null) det=cc.getMessage();} String msg=e.getClass().getSimpleName()+": "+(det==null?"":det.replace('\n',' ').substring(0,Math.min(det.length(),600))); LateAttachVerifier.error("TARGET_RETRANSFORM_FAILURE",in,"target",msg); System.out.println("[FULL] retransform fail "+in+" -> "+msg); } } }
         System.out.println("[FULL] retransformed "+rt+" already-loaded targets");
         // also retransform already-loaded LB classes so their casts are rewritten
-        for (Class<?> c : inst.getAllLoadedClasses()) if (c.getName().startsWith("net.ccbluex.")) { try { inst.retransformClasses(c); } catch(Throwable e){} }
+        for (Class<?> c : inst.getAllLoadedClasses()) if (c.getName().startsWith("net.ccbluex.")&&inst.isModifiableClass(c)) { try { inst.retransformClasses(c); } catch(Throwable e){ LateAttachVerifier.error("CALLER_RETRANSFORM_FAILURE",c.getName(),"caller",rootMsg(e)); } }
+        LateAttachVerifier.writeReport();
+        if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Late-attach verification failed before bootstrap; see report");
+        lbrt.JoinGate.block();
 
         // kick LB bootstrap: fire ClientStartEvent (MixinMinecraft's <init> hook already passed). LB's handler does
         // render-thread work (Window.getRefreshRate, MCEF/GL init) so it MUST run on the MC main thread, not this
@@ -164,16 +227,21 @@ public class FullInjectAgent {
             Object emInst = em.getField("INSTANCE").get(null);
             Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientStartEvent").getField("INSTANCE").get(null);
             java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event"));
-            Runnable kick = () -> { try {
-                unfreezeRegistries();
+            if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
+            Runnable kick = () -> { RegistryThawSession thaw=null; try {
+                thaw = RegistryThawSession.begin();
                 System.out.println("[FULL] (MC main thread) callEvent(ClientStartEvent)");
                 callEvent.invoke(emInst, ev);
+                if(LateAttachVerifier.hasErrors())throw new IllegalStateException("ClientStartEvent class loading produced verification errors");
                 System.out.println("[FULL] ClientStartEvent dispatched");
-                refreezeRegistriesAfterInitialization(mcCls, mc);
-            } catch (Throwable t) { System.out.println("[FULL] kick error -> "+rootMsg(t)); t.printStackTrace(); } };
+                restoreRegistriesAfterInitialization(mcCls, mc, thaw);
+            } catch (Throwable t) {
+                if(thaw!=null){thaw.close();if(thaw.restored)lbrt.JoinGate.cancelAndOpen();}
+                LateAttachVerifier.error("BOOTSTRAP_KICK_FAILURE","LiquidBounce","bootstrap",rootMsg(t));
+                System.out.println("[FULL] kick error -> "+rootMsg(t)); t.printStackTrace(); } };
             mcCls.getMethod("execute", Runnable.class).invoke(mc, kick);
             System.out.println("[FULL] scheduled LB bootstrap on MC main thread");
-        } catch (Throwable e) { System.out.println("[FULL] bootstrap kick FAILED -> "+e); e.printStackTrace(); }
+        } catch (Throwable e) { LateAttachVerifier.error("BOOTSTRAP_SCHEDULE_FAILURE","LiquidBounce","bootstrap",rootMsg(e)); lbrt.JoinGate.cancelAndOpen(); System.out.println("[FULL] bootstrap kick FAILED -> "+e); e.printStackTrace(); }
     }
     /** define into the app loader with the given PD (matches signer of signed target packages); true on success or
      *  benign already-defined, false on a real ClassFormat/Verify defect. */
@@ -183,50 +251,106 @@ public class FullInjectAgent {
             if (m.contains("duplicate")) return true;                         // already defined -> fine
             System.out.println("[FULL] DEFINE-FAIL "+dotted+" -> "+c.getClass().getSimpleName()+": "+c.getMessage());
             return false; } }
-    static boolean defineSynthetics(byte[] cb, ProtectionDomain pd){ boolean ok=true; for (String in : scanSyn(cb)){ String d=in.replace('/','.'); if(!definedSynth.add(d)) continue; try { try { Class.forName(d,false,SYS); continue;}catch(ClassNotFoundException x){} byte[] sb=tr.generateClass(env,d); if(sb==null){ ok=false; continue; } defineSynthetics(sb,pd); ok &= define(d, sb, d.startsWith("org.spongepowered.")?null:pd);}catch(Throwable t){ ok=false; } } return ok; }
+    static synchronized boolean defineSynthetics(byte[] cb, ProtectionDomain pd){boolean ok=true;for(String in:scanSyn(cb)){String d=in.replace('/','.');
+        try{try{Class.forName(d,false,SYS);definedSynth.add(d);continue;}catch(ClassNotFoundException x){}
+            if(!definedSynth.add(d)){ok=false;continue;}
+            byte[] sb=tr.generateClass(env,d);boolean one=sb!=null&&defineSynthetics(sb,pd)&&define(d,sb,d.startsWith("org.spongepowered.")?null:pd);
+            if(!one)definedSynth.remove(d);ok&=one;
+        }catch(Throwable t){definedSynth.remove(d);ok=false;}}return ok;}
     static List<String> scanSyn(byte[] b){ LinkedHashSet<String> o=new LinkedHashSet<>(); try{ ClassReader cr=new ClassReader(b); char[] bu=new char[cr.getMaxStringLength()]; for(int i=1;i<cr.getItemCount();i++){int off=cr.getItem(i); if(off==0||off-1<0)continue; if((b[off-1]&0xff)!=7)continue; try{String n=cr.readUTF8(off,bu); if(n!=null&&(n.startsWith("org/spongepowered/asm/synthetic/")||n.contains("$Anonymous$")))o.add(n);}catch(Throwable x){}}}catch(Throwable x){} return new ArrayList<>(o); }
-    /** Late attach happens long after MC froze its registries; LB registers custom entries (sounds, etc.) at feature
-     *  init. Reflectively clear MappedRegistry.frozen on every registry so those registrations succeed. */
-    static void unfreezeRegistries(){ try {
-        Class<?> bir = Class.forName("net.minecraft.core.registries.BuiltInRegistries", false, SYS);
-        java.lang.reflect.Field wr = bir.getDeclaredField("WRITABLE_REGISTRY"); wr.setAccessible(true); Object root = wr.get(null);
-        Class<?> mapped = Class.forName("net.minecraft.core.MappedRegistry", false, SYS);
-        java.lang.reflect.Field fz = mapped.getDeclaredField("frozen"); fz.setAccessible(true);
-        int n=0; if (mapped.isInstance(root)) { fz.setBoolean(root, false); n++; }
-        for (Object reg : (Iterable<?>) root) if (mapped.isInstance(reg)) { fz.setBoolean(reg, false); n++; }
-        System.out.println("[FULL] unfroze "+n+" registries");
-    } catch(Throwable t){ System.out.println("[FULL] unfreeze registries failed -> "+rootMsg(t)); } }
-    /** LB initializes asynchronously after ClientStartEvent. Keep registries writable only for that window, then
-     *  restore the vanilla frozen state before any server/world load calls MappedRegistry.freeze() again. */
-    static void refreezeRegistriesAfterInitialization(Class<?> mcCls, Object mc) {
-        Thread waiter = new Thread(() -> { try {
+    /** Exact, idempotent registry-state transaction. Originally-unfrozen registries stay unfrozen. */
+    static final class RegistryThawSession implements AutoCloseable {
+        final java.lang.reflect.Field frozen;
+        final IdentityHashMap<Object,Boolean> original;
+        final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+        volatile boolean restored;
+        RegistryThawSession(java.lang.reflect.Field frozen, IdentityHashMap<Object,Boolean> original){this.frozen=frozen;this.original=original;}
+        static RegistryThawSession begin() throws Exception {
+            Class<?> bir=Class.forName("net.minecraft.core.registries.BuiltInRegistries",false,SYS);
+            java.lang.reflect.Field wr=bir.getDeclaredField("WRITABLE_REGISTRY");wr.setAccessible(true);Object root=wr.get(null);
+            Class<?> mapped=Class.forName("net.minecraft.core.MappedRegistry",false,SYS);
+            java.lang.reflect.Field fz=mapped.getDeclaredField("frozen");fz.setAccessible(true);
+            IdentityHashMap<Object,Boolean> states=new IdentityHashMap<>();
+            if(mapped.isInstance(root))states.put(root,fz.getBoolean(root));
+            for(Object reg:(Iterable<?>)root)if(mapped.isInstance(reg))states.put(reg,fz.getBoolean(reg));
+            RegistryThawSession session=new RegistryThawSession(fz,states);
+            try{
+                for(var e:states.entrySet())if(e.getValue())fz.setBoolean(e.getKey(),false);
+                System.out.println("[FULL] thawed "+states.values().stream().filter(Boolean::booleanValue).count()+"/"+states.size()+" registries");
+                return session;
+            }catch(Throwable t){session.close();if(session.restored)try{lbrt.JoinGate.open();}catch(Throwable ignored){}
+                if(t instanceof Exception e)throw e;if(t instanceof Error e)throw e;throw new RuntimeException(t);}
+        }
+        public void close(){if(!closed.compareAndSet(false,true))return;int count=0,failures=0;
+            for(var e:original.entrySet())try{frozen.setBoolean(e.getKey(),e.getValue());count++;}
+                catch(Throwable t){failures++;LateAttachVerifier.error("REGISTRY_RESTORE_FAILURE","registries","bootstrap",rootMsg(t));}
+            restored=failures==0;
+            System.out.println("[FULL] restored original state of "+count+"/"+original.size()+" registries"+(restored?"":"; join gate remains closed"));}
+    }
+    static void restoreAndOpen(RegistryThawSession thaw,boolean initializationSucceeded){
+        thaw.close();if(!thaw.restored)return;
+        if(!initializationSucceeded){System.out.println("[FULL] initialization failed; join gate remains closed");return;}
+        try{lbrt.JoinGate.open();}catch(Throwable t){LateAttachVerifier.error("DEFERRED_JOIN_FAILURE","ConnectScreen","join-gate",rootMsg(t));}
+    }
+    /** LB initializes asynchronously after ClientStartEvent. Restore on every outcome, including timeout/interruption. */
+    static void restoreRegistriesAfterInitialization(Class<?> mcCls, Object mc, RegistryThawSession thaw) {
+        Thread waiter = new Thread(() -> { java.util.concurrent.atomic.AtomicBoolean ready=new java.util.concurrent.atomic.AtomicBoolean();try {
             Class<?> lbCls = Class.forName("net.ccbluex.liquidbounce.LiquidBounce", false, SYS);
             Object lb = lbCls.getField("INSTANCE").get(null);
             java.lang.reflect.Method initialized = lbCls.getMethod("isInitialized");
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(60);
             while (!(Boolean) initialized.invoke(lb)) {
                 if (System.nanoTime() >= deadline) {
-                    System.out.println("[FULL] registry re-freeze timed out waiting for LiquidBounce initialization");
-                    return;
+                    LateAttachVerifier.error("BOOTSTRAP_TIMEOUT","registries","bootstrap","Timed out waiting for LiquidBounce initialization");
+                    break;
                 }
                 Thread.sleep(50L);
             }
-            Runnable freeze = () -> refreezeRegistries();
-            mcCls.getMethod("execute", Runnable.class).invoke(mc, freeze);
-        } catch (Throwable t) { System.out.println("[FULL] registry re-freeze scheduling failed -> "+rootMsg(t)); } }, "lb-registry-refreeze");
+            if(!LateAttachVerifier.hasErrors())ready.set(true);
+        } catch (InterruptedException t) {
+            Thread.currentThread().interrupt();
+            LateAttachVerifier.error("BOOTSTRAP_INTERRUPTED","registries","bootstrap",String.valueOf(t));
+        } catch (Throwable t) {
+            LateAttachVerifier.error("BOOTSTRAP_WAIT_FAILURE","registries","bootstrap",rootMsg(t));
+        } finally {
+            CompletableFuture<Void> done=new CompletableFuture<>();
+            Runnable restore=()->{try{restoreAndOpen(thaw,ready.get());}finally{done.complete(null);}};
+            try {
+                mcCls.getMethod("execute", Runnable.class).invoke(mc, restore);
+                try{done.get(5,TimeUnit.SECONDS);}
+                catch(TimeoutException t){LateAttachVerifier.warn("REGISTRY_RESTORE_MAIN_THREAD_TIMEOUT","registries","bootstrap","Main thread did not run restore within 5 seconds; applying state fallback");thaw.close();}
+                catch(InterruptedException t){Thread.currentThread().interrupt();thaw.close();}
+                catch(ExecutionException t){LateAttachVerifier.error("REGISTRY_RESTORE_TASK_FAILURE","registries","bootstrap",rootMsg(t));thaw.close();}
+            } catch(Throwable t){ thaw.close();if(thaw.restored)lbrt.JoinGate.cancelAndOpen();LateAttachVerifier.error("REGISTRY_RESTORE_SCHEDULE_FAILURE","registries","bootstrap",rootMsg(t)); }
+        } }, "lb-registry-restore");
         waiter.setDaemon(true);
         waiter.start();
     }
-    static void refreezeRegistries(){ try {
-        Class<?> bir = Class.forName("net.minecraft.core.registries.BuiltInRegistries", false, SYS);
-        java.lang.reflect.Field wr = bir.getDeclaredField("WRITABLE_REGISTRY"); wr.setAccessible(true); Object root = wr.get(null);
-        Class<?> mapped = Class.forName("net.minecraft.core.MappedRegistry", false, SYS);
-        java.lang.reflect.Field fz = mapped.getDeclaredField("frozen"); fz.setAccessible(true);
-        int n=0; if (mapped.isInstance(root)) { fz.setBoolean(root, true); n++; }
-        for (Object reg : (Iterable<?>) root) if (mapped.isInstance(reg)) { fz.setBoolean(reg, true); n++; }
-        System.out.println("[FULL] re-froze "+n+" registries after LiquidBounce initialization");
-    } catch(Throwable t){ System.out.println("[FULL] re-freeze registries failed -> "+rootMsg(t)); } }
     static byte[] awApply(String n, byte[] b){ try { Object r = AW_APPLY.invoke(AW, n, b); return (byte[]) r; } catch(Throwable t){ return null; } }
+    static void preflightLbClasses(Path lbJar,RetransformConverter.Resolver resolver,Map<String,String[]> gadded,
+            Map<String,String[]> gfield,Map<String,List<String[]>> ifaces){int total=0,changed=0,failed=0;
+        try(JarFile jf=new JarFile(lbJar.toFile())){for(var en=jf.entries();en.hasMoreElements();){JarEntry e=en.nextElement();String n=e.getName();
+            if(!n.startsWith("net/ccbluex/")||!n.endsWith(".class"))continue;total++;
+            try{byte[] b;try(InputStream in=jf.getInputStream(e)){b=in.readAllBytes();}
+                byte[] rw=AccessorBridgeRewriter.rewrite(n.substring(0,n.length()-6),b);
+                if(!ifaces.isEmpty())rw=RetransformConverter.rewriteCaller(rw,ifaces);
+                rw=RetransformConverter.rewriteLbAw(rw,resolver);
+                if(!LateAttachVerifier.verifyCaller(n.substring(0,n.length()-6),b,rw,gadded,gfield,ifaces))failed++;
+                if(!Arrays.equals(b,rw))changed++;
+            }catch(Throwable t){failed++;LateAttachVerifier.error("CALLER_PREFLIGHT_FAILURE",n,"caller",rootMsg(t));}
+        }}catch(Throwable t){LateAttachVerifier.error("CALLER_PREFLIGHT_IO_FAILURE",String.valueOf(lbJar),"caller",rootMsg(t));failed++;}
+        System.out.println("[FULL] LB caller preflight: "+total+" classes, "+changed+" rewritten, "+failed+" failed");
+    }
+    static void refreshLoadedAccessState(Instrumentation inst,Object aw){try{
+        java.lang.reflect.Field caF=aw.getClass().getDeclaredField("classAccessible");caF.setAccessible(true);
+        @SuppressWarnings("unchecked") Set<String> ca=(Set<String>)caF.get(aw);
+        int added=0;for(Class<?> c:inst.getAllLoadedClasses()){String n=c.getName().replace('.','/');
+            if(!(n.startsWith("net/minecraft/")||n.startsWith("com/mojang/")))continue;
+            if(preLoaded.add(n))added++;
+            if(ca.contains(n)&&!java.lang.reflect.Modifier.isPublic(c.getModifiers()))INACC.add(n);
+        }
+        System.out.println("[FULL] refreshed attach-window classes: +"+added+"; inaccessible="+INACC.size());
+    }catch(Throwable t){LateAttachVerifier.error("ACCESS_STATE_REFRESH_FAILURE","access-widener","preflight",rootMsg(t));}}
     static boolean isPreloadedMc(String o){ return preLoaded.contains(o) && (o.startsWith("net/minecraft/")||o.startsWith("com/mojang/")); }
     static boolean fieldNonPublic(String owner, String name){ return npField.computeIfAbsent(owner+"#"+name, k -> {
         try { Class<?> c = Class.forName(owner.replace('/','.'), false, SYS);
@@ -237,78 +361,6 @@ public class FullInjectAgent {
             if (name.equals("<init>")) { for (var ctor : c.getDeclaredConstructors()) if (org.objectweb.asm.Type.getConstructorDescriptor(ctor).equals(desc)) return !java.lang.reflect.Modifier.isPublic(ctor.getModifiers()); return false; }
             for (Class<?> t=c; t!=null; t=t.getSuperclass()) { for (var m : t.getDeclaredMethods()) if (m.getName().equals(name) && org.objectweb.asm.Type.getMethodDescriptor(m).equals(desc)) return !java.lang.reflect.Modifier.isPublic(m.getModifiers()); }
         } catch(Throwable t){} return false; }); }
-    /** Static @Accessor methods live on the accessor mixin itself. The standalone late-attach pipeline transforms
-     *  target classes manually, so these two callable stubs are not rewritten by Mixin and would retain their
-     *  AssertionError bodies. Replace them with cached reflective reads of Hud's already-loaded private statics. */
-    static byte[] rewriteHudStaticAccessors(byte[] b) { try {
-        org.objectweb.asm.tree.ClassNode c = new org.objectweb.asm.tree.ClassNode();
-        new org.objectweb.asm.ClassReader(b).accept(c, 0);
-        boolean changed = false;
-        for (org.objectweb.asm.tree.MethodNode m : c.methods) {
-            String field;
-            if (m.name.equals("getHotbarSelectionTexture") && m.desc.equals("()Lnet/minecraft/resources/Identifier;"))
-                field = "HOTBAR_SELECTION_SPRITE";
-            else if (m.name.equals("getScoreboardEntryComparator") && m.desc.equals("()Ljava/util/Comparator;"))
-                field = "SCORE_DISPLAY_ORDER";
-            else continue;
-            m.instructions.clear();
-            m.tryCatchBlocks.clear();
-            if (m.localVariables != null) m.localVariables.clear();
-            m.instructions.add(new org.objectweb.asm.tree.InsnNode(org.objectweb.asm.Opcodes.ACONST_NULL));
-            m.instructions.add(new org.objectweb.asm.tree.LdcInsnNode("net/minecraft/client/gui/Hud"));
-            m.instructions.add(new org.objectweb.asm.tree.LdcInsnNode(field));
-            m.instructions.add(new org.objectweb.asm.tree.MethodInsnNode(org.objectweb.asm.Opcodes.INVOKESTATIC,
-                "lbrt/AwReflect", "gO", "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;", false));
-            org.objectweb.asm.Type rt = org.objectweb.asm.Type.getReturnType(m.desc);
-            m.instructions.add(new org.objectweb.asm.tree.TypeInsnNode(org.objectweb.asm.Opcodes.CHECKCAST, rt.getInternalName()));
-            m.instructions.add(new org.objectweb.asm.tree.InsnNode(org.objectweb.asm.Opcodes.ARETURN));
-            changed = true;
-        }
-        if (!changed) return b;
-        org.objectweb.asm.ClassWriter w = new org.objectweb.asm.ClassWriter(new org.objectweb.asm.ClassReader(b),
-            org.objectweb.asm.ClassWriter.COMPUTE_MAXS | org.objectweb.asm.ClassWriter.COMPUTE_FRAMES) {
-            protected String getCommonSuperClass(String a, String bb) { return "java/lang/Object"; }
-        };
-        c.accept(w);
-        System.out.println("[FULL] rewrote static Hud accessor stubs");
-        return w.toByteArray();
-    } catch (Throwable t) { System.out.println("[FULL] Hud accessor rewrite failed -> "+rootMsg(t)); return b; } }
-    /** GuiMessageLineAddition is mixed into both GuiMessage and GuiMessage.Line. The generic dropped-interface map
-     *  has one entry per interface and cannot choose the receiver target for ChatHudExtension's new GuiMessage.
-     *  Resolve its metadata setters explicitly before the generic caller rewrite. */
-    static byte[] rewriteChatHudMessageSetters(byte[] b) { try {
-        org.objectweb.asm.tree.ClassNode c = new org.objectweb.asm.tree.ClassNode();
-        new org.objectweb.asm.ClassReader(b).accept(c, 0);
-        boolean changed = false;
-        for (org.objectweb.asm.tree.MethodNode m : c.methods) for (org.objectweb.asm.tree.AbstractInsnNode p = m.instructions == null ? null : m.instructions.getFirst(); p != null; p = p.getNext()) {
-            if (!(p instanceof org.objectweb.asm.tree.MethodInsnNode mi) || mi.getOpcode() != org.objectweb.asm.Opcodes.INVOKEINTERFACE) continue;
-            boolean setId = mi.owner.equals("net/ccbluex/liquidbounce/interfaces/GuiMessageLineAddition")
-                && mi.name.equals("liquid_bounce$setId") && mi.desc.equals("(Ljava/lang/String;)V");
-            boolean setCount = mi.owner.equals("net/ccbluex/liquidbounce/interfaces/GuiMessageAddition")
-                && mi.name.equals("liquid_bounce$setCount") && mi.desc.equals("(I)V");
-            if (!setId && !setCount) continue;
-            for (org.objectweb.asm.tree.AbstractInsnNode q = p.getPrevious(); q != null; q = q.getPrevious()) {
-                if (q instanceof org.objectweb.asm.tree.TypeInsnNode ti && ti.getOpcode() == org.objectweb.asm.Opcodes.CHECKCAST) {
-                    ti.desc = "net/minecraft/client/multiplayer/chat/GuiMessage";
-                    break;
-                }
-            }
-            String desc = setId
-                ? "(Lnet/minecraft/client/multiplayer/chat/GuiMessage;Ljava/lang/String;)V"
-                : "(Lnet/minecraft/client/multiplayer/chat/GuiMessage;I)V";
-            m.instructions.set(mi, new org.objectweb.asm.tree.MethodInsnNode(org.objectweb.asm.Opcodes.INVOKESTATIC,
-                "net/minecraft/client/multiplayer/chat/GuiMessage$$LBSidecar", "h$" + mi.name, desc, false));
-            changed = true;
-        }
-        if (!changed) return b;
-        org.objectweb.asm.ClassWriter w = new org.objectweb.asm.ClassWriter(new org.objectweb.asm.ClassReader(b),
-            org.objectweb.asm.ClassWriter.COMPUTE_MAXS | org.objectweb.asm.ClassWriter.COMPUTE_FRAMES) {
-            protected String getCommonSuperClass(String a, String bb) { return "java/lang/Object"; }
-        };
-        c.accept(w);
-        System.out.println("[FULL] rewrote ChatHud GuiMessage metadata setters");
-        return w.toByteArray();
-    } catch (Throwable t) { System.out.println("[FULL] ChatHud setter rewrite failed -> "+rootMsg(t)); return b; } }
     static String fieldsOf(byte[] b){ try { org.objectweb.asm.tree.ClassNode c=new org.objectweb.asm.tree.ClassNode(); new org.objectweb.asm.ClassReader(b).accept(c,0); StringBuilder s=new StringBuilder(); for(var f:c.fields) s.append(f.name).append(" "); return s.toString(); } catch(Throwable t){ return "ERR"; } }
     /** [BUG22-DIAG] short sha-256 of class bytes for identity comparison across CFT events / dumps. */
     static String sha(byte[] b){ try { if(b==null) return "null"; var md=java.security.MessageDigest.getInstance("SHA-256"); byte[] h=md.digest(b); StringBuilder s=new StringBuilder(); for(int i=0;i<6;i++) s.append(String.format("%02x",h[i])); return s.toString(); } catch(Throwable t){ return "ERR"; } }
