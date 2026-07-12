@@ -33,19 +33,24 @@ if ($LASTEXITCODE -ne 0) { throw 'converter fixtures failed' }
 # --- 2. assemble full-agent.jar: PA bundle + manifest swap + targets list + converter classes -------------
 $FullJar = Join-Path $FaDir 'full-agent.jar'
 Copy-Item $PA $FullJar -Force
-# Replace the PA manifest instead of merging duplicate Agent-Class/capability keys.
+# Preserve every PA manifest section (especially ASM's package version, which Mixin uses for Java 25 support),
+# changing only the dynamic entry point. Dropping the named ASM section makes real ASM 9.10 look like ASM 9.0.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($FullJar, [System.IO.Compression.ZipArchiveMode]::Update)
-try { $oldManifest = $zip.GetEntry('META-INF/MANIFEST.MF'); if ($null -ne $oldManifest) { $oldManifest.Delete() } }
+try {
+    $oldManifest = $zip.GetEntry('META-INF/MANIFEST.MF')
+    if ($null -eq $oldManifest) { throw 'PA jar has no manifest' }
+    $reader = [System.IO.StreamReader]::new($oldManifest.Open())
+    try { $manifestText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    $oldManifest.Delete()
+}
 finally { $zip.Dispose() }
+if ($manifestText -notmatch '(?ms)Name: org/objectweb/asm/\r?\n.*?Implementation-Version: 9\.[1-9][0-9]*') {
+    throw 'PA manifest is missing a usable ASM 9.x package implementation version'
+}
+$manifestText = $manifestText -replace '(?m)^Agent-Class:[^\r\n]*', 'Agent-Class: FullInjectAgent'
 $ManAdd = Join-Path $FaDir 'manifest-add.txt'
-@'
-Manifest-Version: 1.0
-Premain-Class: vspike.PureVanillaAgent
-Agent-Class: FullInjectAgent
-Can-Retransform-Classes: true
-Can-Redefine-Classes: true
-'@ | Set-Content -Path $ManAdd -Encoding ascii
+$manifestText | Set-Content -Path $ManAdd -Encoding ascii
 Copy-Item (Join-Path $PSScriptRoot 'lb-mixin-targets.txt') (Join-Path $FaDir 'lb-mixin-targets.txt') -Force
 Push-Location $FaDir
 & "$Jdk\jar.exe" ufm full-agent.jar manifest-add.txt lb-mixin-targets.txt -C out .
@@ -57,6 +62,8 @@ foreach ($required in @('FullInjectAgent.class','LateAttachVerifier.class','Acce
         'lbrt/JoinGate.class','lbrt/JoinGate$Call.class')) {
     if ($required -notin $jarEntries) { throw "full-agent.jar missing required entry: $required" }
 }
+& "$Jdk\java.exe" -cp "$TestOut;$FullJar" ConverterAutoTests compat
+if ($LASTEXITCODE -ne 0) { throw 'assembled agent Java 25 compatibility check failed' }
 Write-Host "[build] full-agent.jar OK ($((Get-Item $FullJar).Length) bytes)"
 
 # --- 3. enterworld.jar ------------------------------------------------------------------------------------
