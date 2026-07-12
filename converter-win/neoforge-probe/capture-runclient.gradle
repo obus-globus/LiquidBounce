@@ -1,0 +1,31 @@
+// Capture ModDevGradle's :neoforge:runClient JavaExec recipe (mainClass, classpath, jvmArgs incl. the
+// lazily-resolved jvmArgumentProviders, systemProperties, program args, workingDir) and ABORT before launch.
+// Also clears the ModFoldersProvider (LB dev mod) so the captured recipe boots STOCK NeoForge (no LiquidBounce).
+gradle.projectsEvaluated {
+  rootProject.subprojects.each { sp ->
+    if (sp.name != 'neoforge') return
+    sp.tasks.matching { it.name == "runClient" }.configureEach { t ->
+      if (t instanceof JavaExec) {
+        def je = t as JavaExec
+        je.doFirst {
+          def out = new File("C:/Dev/ProjectsSorted/LiquidBounceSpecial/LiquidBounce/converter-win/neoforge-probe/runclient-recipe.txt")
+          def sb = new StringBuilder()
+          sb.append("MAIN=").append(je.mainClass.getOrElse("<none>")).append("\n")
+          sb.append("WORKDIR=").append(je.workingDir?.absolutePath).append("\n")
+          sb.append("EXECUTABLE=").append(je.executable).append("\n")
+          sb.append("---JVMARGS---\n")            // includes providers (ModFolders, module path, legacyClassPath...)
+          je.allJvmArgs.each { sb.append(it).append("\n") }
+          sb.append("---SYSPROPS---\n")
+          je.systemProperties.each { k,v -> sb.append(k).append("=").append(v).append("\n") }
+          sb.append("---ARGS---\n")
+          je.args.each { sb.append(it).append("\n") }
+          sb.append("---CLASSPATH---\n")
+          je.classpath.each { sb.append(it.absolutePath).append("\n") }
+          out.text = sb.toString()
+          println "[NF-CAPTURE] wrote recipe to " + out.absolutePath
+          throw new StopExecutionException("captured; not launching")
+        }
+      }
+    }
+  }
+}

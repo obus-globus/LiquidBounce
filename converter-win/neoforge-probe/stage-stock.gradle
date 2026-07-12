@@ -1,0 +1,10 @@
+// Stage NeoForge run recipe. The mcef-neoforge SNAPSHOT no longer resolves (env drift); substitute it
+// with the cached plain net.ccbluex:mcef (same MCEF API) so LB's neoforge module compiles and
+// ModDevGradle can emit the run recipe (createClientLaunchScript). LB is deregistered at replay time.
+allprojects {
+  configurations.all {
+    resolutionStrategy.dependencySubstitution {
+      substitute(module("net.ccbluex:mcef-neoforge")).using(module("net.ccbluex:mcef:3.3.2-26.2-SNAPSHOT"))
+    }
+  }
+}
