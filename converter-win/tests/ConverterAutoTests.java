@@ -39,6 +39,7 @@ public final class ConverterAutoTests {
         testConverterRestoresOriginalSchema();
         testConverterPreservesSupportedVersionLift();
         testSyntheticScanSkipsSelf();
+        testReentrantCacheResolution();
         System.out.println("[AUTO-TEST] all converter automation fixtures passed");
     }
 
@@ -185,6 +186,13 @@ public final class ConverterAutoTests {
         String dependency="org/spongepowered/asm/synthetic/args/TestDependency";
         List<String> refs=FullInjectAgent.scanSyn(syntheticFixture(self,dependency));
         no(refs.contains(self));yes(refs.contains(dependency));
+    }
+
+    static void testReentrantCacheResolution() {
+        Map<String,Boolean> cache=new java.util.concurrent.ConcurrentHashMap<>();
+        eq("Aa".hashCode(),"BB".hashCode());
+        yes(FullInjectAgent.cachedBoolean(cache,"Aa",()->FullInjectAgent.cachedBoolean(cache,"BB",()->true)));
+        eq(2,cache.size());
     }
 
     static byte[] callerFixture(String owner,String iface){ClassWriter w=new ClassWriter(ClassWriter.COMPUTE_FRAMES|ClassWriter.COMPUTE_MAXS);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"call","(Ljava/lang/Object;)Ljava/lang/String;",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.CHECKCAST,iface);m.visitMethodInsn(Opcodes.INVOKEINTERFACE,iface,"value","()Ljava/lang/String;",true);m.visitInsn(Opcodes.ARETURN);m.visitMaxs(0,0);m.visitEnd();m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"isDuck","(Ljava/lang/Object;)Z",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.INSTANCEOF,iface);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(0,0);m.visitEnd();m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"callWide","(Ljava/lang/Object;JD)I",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.CHECKCAST,iface);m.visitVarInsn(Opcodes.LLOAD,1);m.visitVarInsn(Opcodes.DLOAD,3);m.visitMethodInsn(Opcodes.INVOKEINTERFACE,iface,"wide","(JD)I",true);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(0,0);m.visitEnd();w.visitEnd();return w.toByteArray();}

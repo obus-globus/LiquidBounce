@@ -185,7 +185,7 @@ public class FullInjectAgent {
                     return rw==b?null:rw;
                 }
                 if (n.startsWith("net/minecraft/")||n.startsWith("com/mojang/")) return awApply(n,b);  // widen future MC classes (on-load) + AW-class retransforms
-            } catch(Throwable x){ LateAttachVerifier.error("TRANSFORM_FAILURE",n,"cft",rootMsg(x)); System.out.println("[FULL] CFT fail "+n+" -> "+rootMsg(x)); }
+            } catch(Throwable x){ LateAttachVerifier.error("TRANSFORM_FAILURE",n,"cft",rootMsg(x)); System.out.println("[FULL] CFT fail "+n+" -> "+rootMsg(x)); x.printStackTrace(System.out); }
             return null; } }, true);
         refreshLoadedAccessState(inst,aw);
 
@@ -381,15 +381,20 @@ public class FullInjectAgent {
         System.out.println("[FULL] refreshed attach-window classes: +"+added+"; inaccessible="+INACC.size());
     }catch(Throwable t){LateAttachVerifier.error("ACCESS_STATE_REFRESH_FAILURE","access-widener","preflight",rootMsg(t));}}
     static boolean isPreloadedMc(String o){ return preLoaded.contains(o) && (o.startsWith("net/minecraft/")||o.startsWith("com/mojang/")); }
-    static boolean fieldNonPublic(String owner, String name){ return npField.computeIfAbsent(owner+"#"+name, k -> {
+    static boolean fieldNonPublic(String owner, String name){ return cachedBoolean(npField,owner+"#"+name,() -> {
         try { Class<?> c = Class.forName(owner.replace('/','.'), false, SYS);
             for (Class<?> t=c; t!=null; t=t.getSuperclass()) { for (var f : t.getDeclaredFields()) if (f.getName().equals(name)) return !java.lang.reflect.Modifier.isPublic(f.getModifiers()); }
         } catch(Throwable t){} return false; }); }
-    static boolean methodNonPublic(String owner, String name, String desc){ return npMethod.computeIfAbsent(owner+"#"+name+" "+desc, k -> {
+    static boolean methodNonPublic(String owner, String name, String desc){ return cachedBoolean(npMethod,owner+"#"+name+" "+desc,() -> {
         try { Class<?> c = Class.forName(owner.replace('/','.'), false, SYS);
             if (name.equals("<init>")) { for (var ctor : c.getDeclaredConstructors()) if (org.objectweb.asm.Type.getConstructorDescriptor(ctor).equals(desc)) return !java.lang.reflect.Modifier.isPublic(ctor.getModifiers()); return false; }
             for (Class<?> t=c; t!=null; t=t.getSuperclass()) { for (var m : t.getDeclaredMethods()) if (m.getName().equals(name) && org.objectweb.asm.Type.getMethodDescriptor(m).equals(desc)) return !java.lang.reflect.Modifier.isPublic(m.getModifiers()); }
         } catch(Throwable t){} return false; }); }
+    static boolean cachedBoolean(Map<String,Boolean> cache,String key,java.util.function.BooleanSupplier resolver){
+        Boolean cached=cache.get(key);if(cached!=null)return cached;
+        boolean resolved=resolver.getAsBoolean();Boolean raced=cache.putIfAbsent(key,resolved);
+        return raced==null?resolved:raced;
+    }
     static String fieldsOf(byte[] b){ try { org.objectweb.asm.tree.ClassNode c=new org.objectweb.asm.tree.ClassNode(); new org.objectweb.asm.ClassReader(b).accept(c,0); StringBuilder s=new StringBuilder(); for(var f:c.fields) s.append(f.name).append(" "); return s.toString(); } catch(Throwable t){ return "ERR"; } }
     /** [BUG22-DIAG] short sha-256 of class bytes for identity comparison across CFT events / dumps. */
     static String sha(byte[] b){ try { if(b==null) return "null"; var md=java.security.MessageDigest.getInstance("SHA-256"); byte[] h=md.digest(b); StringBuilder s=new StringBuilder(); for(int i=0;i<6;i++) s.append(String.format("%02x",h[i])); return s.toString(); } catch(Throwable t){ return "ERR"; } }
