@@ -29,6 +29,7 @@ public class FullInjectAgent {
     static final Map<String,Boolean> npField = new ConcurrentHashMap<>();          // owner#name -> non-public?
     static final Map<String,Boolean> npMethod = new ConcurrentHashMap<>();         // owner#name desc -> non-public?
     static final Set<String> INACC = ConcurrentHashMap.newKeySet();                // already-loaded package-private MC classes LB references by type
+    static final Set<String> preBootstrapLb = ConcurrentHashMap.newKeySet();       // LB classes present before normal on-load caller rewriting
     /** per-target conversion: target' bytes + sidecar/state (defined LAZILY in the CFT with the target's real PD). */
     static final class Conv { byte[] target, sidecar, state; String sidecarName, stateName; volatile boolean defined;
         boolean define(ProtectionDomain pd){ synchronized(this){ if(defined) return true;
@@ -205,32 +206,26 @@ public class FullInjectAgent {
             throw new IllegalStateException("Late-attach preflight failed before target retransformation; see report");
         }
 
-        // retransform already-loaded mixin targets with their converted form (CFT defines their sidecar with the class PD)
-        int rt=0; for (Class<?> c : inst.getAllLoadedClasses()) { String in=c.getName().replace('.','/');
-            if (convMap.containsKey(in)&&preLoaded.contains(in)&&!in.equals(JoinGateRewriter.CONNECT_SCREEN)) { try {
-            if(!inst.isModifiableClass(c))throw new UnmodifiableClassException(in);
-            inst.retransformClasses(c); rt++;
-        } catch(Throwable e){ String det = e.getMessage(); Throwable cc=e; while(cc.getCause()!=null){cc=cc.getCause(); if(cc.getMessage()!=null) det=cc.getMessage();} String msg=e.getClass().getSimpleName()+": "+(det==null?"":det.replace('\n',' ').substring(0,Math.min(det.length(),600))); LateAttachVerifier.error("TARGET_RETRANSFORM_FAILURE",in,"target",msg); System.out.println("[FULL] retransform fail "+in+" -> "+msg); } } }
-        System.out.println("[FULL] retransformed "+rt+" already-loaded targets");
-        // also retransform already-loaded LB classes so their casts are rewritten
-        for (Class<?> c : inst.getAllLoadedClasses()) if (c.getName().startsWith("net.ccbluex.")&&inst.isModifiableClass(c)) { try { inst.retransformClasses(c); } catch(Throwable e){ LateAttachVerifier.error("CALLER_RETRANSFORM_FAILURE",c.getName(),"caller",rootMsg(e)); } }
-        LateAttachVerifier.writeReport();
-        if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Late-attach verification failed before bootstrap; see report");
+        for(Class<?> c:inst.getAllLoadedClasses())if(c.getName().startsWith("net.ccbluex."))preBootstrapLb.add(c.getName());
         lbrt.JoinGate.block();
 
-        // kick LB bootstrap: fire ClientStartEvent (MixinMinecraft's <init> hook already passed). LB's handler does
-        // render-thread work (Window.getRefreshRate, MCEF/GL init) so it MUST run on the MC main thread, not this
-        // Attach Listener thread -> schedule via Minecraft.execute(Runnable).
+        // Bootstrap LB on the Minecraft thread while target hooks are still INACTIVE. ClientStartEvent launches an
+        // asynchronous coroutine; activating targets merely in the same initial turn is not enough, because later
+        // render/entity hooks can run before managers/features finish and circularly initialize Kotlin singletons.
+        // The readiness waiter below publishes all target retransforms only after LiquidBounce.isInitialized=true.
         try {
-            Class.forName("net.ccbluex.liquidbounce.LiquidBounce", false, SYS);
             Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft", false, SYS);
             Object mc = mcCls.getMethod("getInstance").invoke(null);
-            Class<?> em = Class.forName("net.ccbluex.liquidbounce.event.EventManager");
-            Object emInst = em.getField("INSTANCE").get(null);
-            Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientStartEvent").getField("INSTANCE").get(null);
-            java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event"));
-            if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
             Runnable kick = () -> { RegistryThawSession thaw=null; try {
+                // Initializing the singleton registers its ClientStartEvent handler. Loading it with initialize=false
+                // fires the event into an empty listener set; the readiness waiter then initializes LiquidBounce on
+                // its own background thread after the event was already lost, causing module singleton races.
+                Class.forName("net.ccbluex.liquidbounce.LiquidBounce", true, SYS);
+                Class<?> em = Class.forName("net.ccbluex.liquidbounce.event.EventManager");
+                Object emInst = em.getField("INSTANCE").get(null);
+                Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientStartEvent").getField("INSTANCE").get(null);
+                java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event"));
+                if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
                 thaw = RegistryThawSession.begin();
                 System.out.println("[FULL] (MC main thread) callEvent(ClientStartEvent)");
                 callEvent.invoke(emInst, ev);
@@ -244,6 +239,25 @@ public class FullInjectAgent {
             mcCls.getMethod("execute", Runnable.class).invoke(mc, kick);
             System.out.println("[FULL] scheduled LB bootstrap on MC main thread");
         } catch (Throwable e) { LateAttachVerifier.error("BOOTSTRAP_SCHEDULE_FAILURE","LiquidBounce","bootstrap",rootMsg(e)); lbrt.JoinGate.cancelAndOpen(); System.out.println("[FULL] bootstrap kick FAILED -> "+e); e.printStackTrace(); }
+    }
+
+    /** Publish all already-loaded target/caller rewrites from the Minecraft thread after bootstrap readiness. */
+    static void activateLoadedTargets(Instrumentation inst) throws Exception {
+        int rt=0;
+        for (Class<?> c : inst.getAllLoadedClasses()) { String in=c.getName().replace('.','/');
+            if (convMap.containsKey(in)&&preLoaded.contains(in)&&!in.equals(JoinGateRewriter.CONNECT_SCREEN)) { try {
+                if(!inst.isModifiableClass(c))throw new UnmodifiableClassException(in);
+                inst.retransformClasses(c); rt++;
+            } catch(Throwable e){ String det=e.getMessage();Throwable cc=e;while(cc.getCause()!=null){cc=cc.getCause();if(cc.getMessage()!=null)det=cc.getMessage();}String msg=e.getClass().getSimpleName()+": "+(det==null?"":det.replace('\n',' ').substring(0,Math.min(det.length(),600)));LateAttachVerifier.error("TARGET_RETRANSFORM_FAILURE",in,"target",msg);System.out.println("[FULL] retransform fail "+in+" -> "+msg); }
+            }
+        }
+        System.out.println("[FULL] retransformed "+rt+" already-loaded targets on MC main thread");
+        for (Class<?> c : inst.getAllLoadedClasses()) if (preBootstrapLb.contains(c.getName())&&inst.isModifiableClass(c)) {
+            try { inst.retransformClasses(c); }
+            catch(Throwable e){ LateAttachVerifier.error("CALLER_RETRANSFORM_FAILURE",c.getName(),"caller",rootMsg(e)); }
+        }
+        LateAttachVerifier.writeReport();
+        if(LateAttachVerifier.hasErrors())throw new IllegalStateException("Late-attach verification failed before bootstrap; see report");
     }
     /** define into the app loader with the given PD (matches signer of signed target packages); true on success or
      *  benign already-defined, false on a real ClassFormat/Verify defect. */
@@ -334,11 +348,15 @@ public class FullInjectAgent {
             LateAttachVerifier.error("BOOTSTRAP_WAIT_FAILURE","registries","bootstrap",rootMsg(t));
         } finally {
             CompletableFuture<Void> done=new CompletableFuture<>();
-            Runnable restore=()->{try{restoreAndOpen(thaw,ready.get());}finally{done.complete(null);}};
+            Runnable restore=()->{try{
+                if(ready.get())try{activateLoadedTargets(INST);}
+                catch(Throwable t){ready.set(false);LateAttachVerifier.error("TARGET_ACTIVATION_FAILURE","targets","bootstrap",rootMsg(t));System.out.println("[FULL] target activation FAILED -> "+rootMsg(t));}
+                restoreAndOpen(thaw,ready.get());
+            }finally{done.complete(null);}};
             try {
                 mcCls.getMethod("execute", Runnable.class).invoke(mc, restore);
-                try{done.get(5,TimeUnit.SECONDS);}
-                catch(TimeoutException t){LateAttachVerifier.warn("REGISTRY_RESTORE_MAIN_THREAD_TIMEOUT","registries","bootstrap","Main thread did not run restore within 5 seconds; applying state fallback");thaw.close();}
+                try{done.get(60,TimeUnit.SECONDS);}
+                catch(TimeoutException t){LateAttachVerifier.warn("REGISTRY_RESTORE_MAIN_THREAD_TIMEOUT","registries","bootstrap","Main thread did not finish activation/restore within 60 seconds; applying state fallback");thaw.close();}
                 catch(InterruptedException t){Thread.currentThread().interrupt();thaw.close();}
                 catch(ExecutionException t){LateAttachVerifier.error("REGISTRY_RESTORE_TASK_FAILURE","registries","bootstrap",rootMsg(t));thaw.close();}
             } catch(Throwable t){ thaw.close();if(thaw.restored)lbrt.JoinGate.cancelAndOpen();LateAttachVerifier.error("REGISTRY_RESTORE_SCHEDULE_FAILURE","registries","bootstrap",rootMsg(t)); }

@@ -43,6 +43,8 @@ public final class ConverterAutoTests {
         testReentrantCacheResolution();
         testResolvedInvocationPreservesCause();
         testInheritedProtectedFieldLowering();
+        testRelocatedMethodAccessLowering();
+        testRelocatedInstanceInitializerReplay();
         System.out.println("[AUTO-TEST] all converter automation fixtures passed");
     }
 
@@ -220,6 +222,39 @@ public final class ConverterAutoTests {
         }finally{RetransformConverter.CLASS_BYTES=old;}
     }
 
+    static void testRelocatedMethodAccessLowering() {
+        String base="fixture/base/MethodBase",child="fixture/sub/MethodChild",hidden="fixture/hidden/Hidden";
+        byte[] baseBytes=protectedMethodBaseFixture(base),hiddenBytes=privateCtorFixture(hidden),original=methodAccessFixture(child,base,hidden,false),mixed=methodAccessFixture(child,base,hidden,true);
+        var old=RetransformConverter.CLASS_BYTES;RetransformConverter.CLASS_BYTES=n->n.equals(base)?baseBytes:n.equals(hidden)?hiddenBytes:n.equals(child)?original:null;
+        RetransformConverter.METHOD_ACCESS.clear();
+        try{
+            RetransformConverter.Result result=new RetransformConverter(child).run(original,mixed);ClassNode sidecar=new ClassNode();new ClassReader(result.sidecar).accept(sidecar,0);
+            boolean directMethod=false,directCtor=false,reflectedMethod=false,reflectedCtor=false;
+            for(MethodNode m:sidecar.methods)for(AbstractInsnNode p=m.instructions.getFirst();p!=null;p=p.getNext()){
+                if(p instanceof MethodInsnNode call&&call.owner.equals(base)&&call.name.equals("touch"))directMethod=true;
+                if(p instanceof MethodInsnNode call&&call.owner.equals(hidden)&&call.name.equals("<init>"))directCtor=true;
+                if(p instanceof MethodInsnNode call&&call.owner.equals("lbrt/AwReflect")&&call.name.equals("inv"))reflectedMethod=true;
+                if(p instanceof MethodInsnNode call&&call.owner.equals("lbrt/AwReflect")&&call.name.equals("newInst"))reflectedCtor=true;
+            }
+            no(directMethod);no(directCtor);yes(reflectedMethod);yes(reflectedCtor);
+        }finally{RetransformConverter.CLASS_BYTES=old;RetransformConverter.METHOD_ACCESS.clear();}
+    }
+
+    static void testRelocatedInstanceInitializerReplay() {
+        String owner="fixture/InitializedState";byte[] original=initializedStateFixture(owner,false),mixed=initializedStateFixture(owner,true);
+        var old=RetransformConverter.CLASS_BYTES;RetransformConverter.CLASS_BYTES=n->n.equals(owner)?original:null;
+        try{
+            RetransformConverter.Result result=new RetransformConverter(owner).run(original,mixed);ClassNode sidecar=new ClassNode();new ClassReader(result.sidecar).accept(sidecar,0);
+            MethodNode init=sidecar.methods.stream().filter(m->m.name.equals("initState")).findFirst().orElseThrow();boolean count=false,threadLocal=false,called=false;
+            for(AbstractInsnNode p=init.instructions.getFirst();p!=null;p=p.getNext()){
+                if(p instanceof FieldInsnNode f&&f.getOpcode()==Opcodes.PUTFIELD&&f.name.equals("count"))count=true;
+                if(p instanceof TypeInsnNode t&&t.getOpcode()==Opcodes.NEW&&t.desc.equals("java/lang/ThreadLocal"))threadLocal=true;
+            }
+            for(MethodNode m:sidecar.methods)if(m.name.equals("getState"))for(AbstractInsnNode p=m.instructions.getFirst();p!=null;p=p.getNext())if(p instanceof MethodInsnNode call&&call.owner.equals(sidecar.name)&&call.name.equals("initState"))called=true;
+            yes(count);yes(threadLocal);yes(called);
+        }finally{RetransformConverter.CLASS_BYTES=old;}
+    }
+
     static byte[] callerFixture(String owner,String iface){ClassWriter w=new ClassWriter(ClassWriter.COMPUTE_FRAMES|ClassWriter.COMPUTE_MAXS);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"call","(Ljava/lang/Object;)Ljava/lang/String;",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.CHECKCAST,iface);m.visitMethodInsn(Opcodes.INVOKEINTERFACE,iface,"value","()Ljava/lang/String;",true);m.visitInsn(Opcodes.ARETURN);m.visitMaxs(0,0);m.visitEnd();m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"isDuck","(Ljava/lang/Object;)Z",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.INSTANCEOF,iface);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(0,0);m.visitEnd();m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"callWide","(Ljava/lang/Object;JD)I",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.CHECKCAST,iface);m.visitVarInsn(Opcodes.LLOAD,1);m.visitVarInsn(Opcodes.DLOAD,3);m.visitMethodInsn(Opcodes.INVOKEINTERFACE,iface,"wide","(JD)I",true);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(0,0);m.visitEnd();w.visitEnd();return w.toByteArray();}
     static byte[] accessorFixture(String owner,String target){ClassWriter w=new ClassWriter(ClassWriter.COMPUTE_FRAMES|ClassWriter.COMPUTE_MAXS);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT|Opcodes.ACC_INTERFACE,owner,null,"java/lang/Object",null);addMixin(w,target);addAccessorStub(w,"getSecret","()Ljava/lang/String;","SECRET");addAccessorStub(w,"getNumber","()I","NUMBER");addAccessorStub(w,"setNumber","(I)V","NUMBER");MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"createAccessorTarget","(Ljava/lang/String;)L"+target+";",null,null);m.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Invoker;",false).visitEnd();stub(m);w.visitEnd();return w.toByteArray();}
     static byte[] abstractAccessorFixture(String owner,String target){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT|Opcodes.ACC_INTERFACE,owner,null,"java/lang/Object",null);addMixin(w,target);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT,"getValue","()Ljava/lang/String;",null,null);m.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Accessor;",false).visitEnd();m.visitEnd();w.visitEnd();return w.toByteArray();}
@@ -234,6 +269,10 @@ public final class ConverterAutoTests {
     static byte[] syntheticFixture(String self,String dependency){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,self,null,"java/lang/Object",null);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"touch","()V",null,null);m.visitCode();m.visitTypeInsn(Opcodes.NEW,dependency);m.visitInsn(Opcodes.POP);m.visitInsn(Opcodes.RETURN);m.visitMaxs(1,0);m.visitEnd();w.visitEnd();return w.toByteArray();}
     static byte[] protectedBaseFixture(String owner){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);w.visitField(Opcodes.ACC_PROTECTED,"minecraft","Ljava/lang/Object;",null,null).visitEnd();w.visitEnd();return w.toByteArray();}
     static byte[] inheritedFieldFixture(String owner,String base,boolean handler){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,base,null);if(handler){MethodVisitor m=w.visitMethod(Opcodes.ACC_PRIVATE,"handler$inventory","()Ljava/lang/Object;",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitFieldInsn(Opcodes.GETFIELD,base,"minecraft","Ljava/lang/Object;");m.visitInsn(Opcodes.ARETURN);m.visitMaxs(1,1);m.visitEnd();}w.visitEnd();return w.toByteArray();}
+    static byte[] protectedMethodBaseFixture(String owner){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);MethodVisitor m=w.visitMethod(Opcodes.ACC_PROTECTED,"touch","()V",null,null);m.visitCode();m.visitInsn(Opcodes.RETURN);m.visitMaxs(0,1);m.visitEnd();w.visitEnd();return w.toByteArray();}
+    static byte[] privateCtorFixture(String owner){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);MethodVisitor m=w.visitMethod(Opcodes.ACC_PRIVATE,"<init>","()V",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitMethodInsn(Opcodes.INVOKESPECIAL,"java/lang/Object","<init>","()V",false);m.visitInsn(Opcodes.RETURN);m.visitMaxs(1,1);m.visitEnd();w.visitEnd();return w.toByteArray();}
+    static byte[] methodAccessFixture(String owner,String base,String hidden,boolean handler){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,base,null);if(handler){MethodVisitor m=w.visitMethod(Opcodes.ACC_PRIVATE,"handler$methods","()Ljava/lang/Object;",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitMethodInsn(Opcodes.INVOKEVIRTUAL,base,"touch","()V",false);m.visitTypeInsn(Opcodes.NEW,hidden);m.visitInsn(Opcodes.DUP);m.visitMethodInsn(Opcodes.INVOKESPECIAL,hidden,"<init>","()V",false);m.visitInsn(Opcodes.ARETURN);m.visitMaxs(2,1);m.visitEnd();}w.visitEnd();return w.toByteArray();}
+    static byte[] initializedStateFixture(String owner,boolean mixed){ClassWriter w=new ClassWriter(ClassWriter.COMPUTE_FRAMES|ClassWriter.COMPUTE_MAXS);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);if(mixed){w.visitField(Opcodes.ACC_PRIVATE,"count","I",null,null).visitEnd();w.visitField(Opcodes.ACC_PRIVATE,"local","Ljava/lang/ThreadLocal;",null,null).visitEnd();}MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC,"<init>","()V",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitMethodInsn(Opcodes.INVOKESPECIAL,"java/lang/Object","<init>","()V",false);if(mixed){m.visitVarInsn(Opcodes.ALOAD,0);m.visitInsn(Opcodes.ICONST_1);m.visitFieldInsn(Opcodes.PUTFIELD,owner,"count","I");m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.NEW,"java/lang/ThreadLocal");m.visitInsn(Opcodes.DUP);m.visitMethodInsn(Opcodes.INVOKESPECIAL,"java/lang/ThreadLocal","<init>","()V",false);m.visitFieldInsn(Opcodes.PUTFIELD,owner,"local","Ljava/lang/ThreadLocal;");}m.visitInsn(Opcodes.RETURN);m.visitMaxs(0,0);m.visitEnd();w.visitEnd();return w.toByteArray();}
 
     static String internal(Class<?> c){return c.getName().replace('.','/');}
     static byte[] bytesOf(Class<?> c)throws Exception{try(InputStream in=c.getClassLoader().getResourceAsStream(internal(c)+".class")){return Objects.requireNonNull(in).readAllBytes();}}
