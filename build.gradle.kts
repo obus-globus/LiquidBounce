@@ -414,3 +414,110 @@ tasks.named("sourcesJar") {
 tasks.named("build") {
     dependsOn("copyZipInclude")
 }
+
+// ===== Late-attach injector agent (see injector/README.md) =====
+// A dynamic-attach (agentmain) jar that injects full LiquidBounce into an ALREADY-RUNNING, unmodified client
+// (vanilla / Fabric / NeoForge) via the schema-neutral retransform converter. Attach-only by design: the manifest
+// carries Agent-Class ONLY (no Premain-Class, no launcher, no on-load transform). The LoaderPlatform SPI detects the
+// target loader at agentmain; the bundled LB payload is loader-neutral (LB main + the vanilla Platform impl).
+sourceSets {
+    create("injectorMixinService") {   // standalone Sponge-Mixin service (the mixin engine used on bare vanilla)
+        java.srcDir("injector/src/mixinservice/java")
+        resources.srcDir("injector/src/mixinservice/resources")
+        compileClasspath += sourceSets.main.get().compileClasspath
+    }
+    create("injectorAgent") {          // converter engine + loader platforms (imports vspike + LB + MC)
+        java.srcDir("injector/src/main/java")
+        compileClasspath += sourceSets.main.get().compileClasspath +
+            sourceSets.main.get().output + sourceSets["injectorMixinService"].output
+    }
+    create("injectorLbVanilla") {      // LB Platform SPI vanilla impl — compiled INTO the LB payload
+        java.srcDir("injector/src/lbpayload/java")
+        resources.srcDir("injector/src/lbpayload/resources")
+        compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
+    }
+    create("injectorTool") {           // standalone attach launcher (NOT part of the agent jar)
+        java.srcDir("injector/tools/java")
+    }
+}
+val injectorMixinExtras: Configuration by configurations.creating { isTransitive = false }
+dependencies { injectorMixinExtras("io.github.llamalad7:mixinextras-common:0.5.4") }
+
+// LB payload jar: loader-neutral LB classes/resources + the vanilla Platform impl (its Platform service wins).
+tasks.register<Jar>("lbClassesForInjector") {
+    dependsOn("classes", "processResources", "injectorLbVanillaClasses")
+    archiveFileName.set("liquidbounce.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("injector/tmp"))
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(sourceSets["injectorLbVanilla"].output)   // vanilla Platform impl + its net.ccbluex...platform.Platform service
+    from(sourceSets.main.get().output)             // LB compiled classes + resources (mixin json, AW, assets)
+}
+
+tasks.register<Jar>("injectorAgentJar") {
+    group = "liquidbounce"
+    description = "Dynamic-attach agent: inject LiquidBounce into a running vanilla/Fabric/NeoForge client."
+    dependsOn("injectorMixinServiceClasses", "injectorAgentClasses", "lbClassesForInjector")
+    archiveFileName.set("liquidbounce-injector-agent.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("injector"))
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    val asmJars = configurations.runtimeClasspath.get().files.filter { it.name.matches(Regex("asm(-\\w+)?-\\d.*\\.jar")) }
+    val spongeJar = configurations.runtimeClasspath.get().files.filter { it.name.startsWith("sponge-mixin") }
+    val asmVer = asmJars.first { it.name.matches(Regex("asm-\\d.*\\.jar")) }.name.removePrefix("asm-").removeSuffix(".jar")
+    manifest {
+        // Agent-Class ONLY → dynamic attach only. No Premain-Class: the jar cannot be used as an on-load -javaagent.
+        attributes("Agent-Class" to "FullInjectAgent",
+                   "Can-Retransform-Classes" to "true", "Can-Redefine-Classes" to "true")
+        // Mixin's CompatibilityLevel.JAVA_25 check reads ASM's manifest Implementation-Version; pin it.
+        attributes(mapOf("Implementation-Title" to "ASM", "Implementation-Version" to asmVer), "org/objectweb/asm/")
+    }
+    // Mixin framework + standalone VSpike service at root (system loader); drop rival service files/signatures/module-info.
+    val infra = asmJars + spongeJar + injectorMixinExtras.files
+    from(infra.map { zipTree(it) }) {
+        exclude("META-INF/services/**", "module-info.class", "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "META-INF/MANIFEST.MF")
+    }
+    from(sourceSets["injectorMixinService"].output)   // vspike.* + our Mixin-service SPI registrations
+    from(sourceSets["injectorAgent"].output)          // FullInjectAgent + converter + lbrt.* at root
+    from("injector/lb-mixin-targets.txt")             // converter target list (read as a jar resource)
+    from("src/main/resources/liquidbounce.accesswidener")  // AW at root (agent reads it as a resource)
+
+    // LB payload under agent-libs/: LB classes jar + LB-owned deps. Drop MC/loader/lwjgl/etc (already on the target).
+    val dropGroups = setOf(
+        "org.lwjgl", "io.netty", "com.mojang", "org.apache.logging.log4j", "org.apache.commons",
+        "net.java.dev.jna", "org.slf4j", "org.jspecify", "org.joml", "org.jcraft", "net.sf.jopt-simple",
+        "it.unimi.dsi", "com.google.guava", "com.ibm.icu", "com.github.oshi", "commons-io", "commons-codec",
+        "com.google.code.gson", "com.azure", "com.microsoft.azure", "org.ow2.asm", "io.github.llamalad7",
+        "net.fabricmc", "maven.modrinth", "ca.weblite", "at.yawk.lz4"
+    )
+    into("agent-libs") {
+        from(tasks.named<Jar>("lbClassesForInjector").flatMap { it.archiveFile })
+        from(configurations.runtimeClasspath.get().filter { f ->
+            if (!f.name.endsWith(".jar")) return@filter false
+            val p = f.absolutePath
+            if (p.contains("loom-cache") || f.name.contains("minecraft-merged")) return@filter false
+            if (f.name.startsWith("fabric-loader") || f.name.startsWith("sponge-mixin")) return@filter false
+            if (f.name.startsWith("lwjgl-egl")) return@filter true   // MCEF needs org.lwjgl.egl (bare vanilla omits it)
+            val g = if (p.contains("files-2.1/")) p.substringAfter("files-2.1/").substringBefore("/") else ""
+            g !in dropGroups
+        })
+    }
+    // (opt-in) -PbundleMcefNative bundles MCEF's native libcef so MCEF inits fully offline (headless/CI).
+    if (project.hasProperty("bundleMcefNative")) {
+        val nd = file((project.findProperty("mcefNativeDir") as String?)
+            ?: "$rootDir/LiquidBounce/mcef/libraries/aa20e50dbfb858ea50d3cf405b8202462dd10d96/linux_amd64")
+        if (!nd.isDirectory) throw GradleException("bundleMcefNative: native dir not found: $nd (pass -PmcefNativeDir=)")
+        from(nd) { into("mcef-native") }
+        logger.lifecycle("bundleMcefNative ON: bundling MCEF native from $nd")
+    }
+}
+
+// Standalone attach launcher (Swing VM-picker + attach + live log tail). Run this to attach the agent to a live PID.
+tasks.register<Jar>("injectorToolJar") {
+    group = "liquidbounce"
+    description = "Standalone launcher that attaches the injector agent to a running client JVM."
+    dependsOn("injectorToolClasses")
+    archiveFileName.set("liquidbounce-injector-tool.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("injector"))
+    manifest { attributes("Main-Class" to "InjectorUi") }
+    from(sourceSets["injectorTool"].output)
+}

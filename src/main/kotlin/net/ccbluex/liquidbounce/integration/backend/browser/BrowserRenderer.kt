@@ -94,6 +94,8 @@ class BrowserRenderer(val browser: Browser) : EventListener, AutoCloseable {
      * Renders a browser tab with proper scaling
      */
     private fun render(context: GuiGraphicsExtractor) {
+        ClientRenderPipelines.ensureCompiled()
+
         val texture = browser.texture ?: return
         val scaleFactor = mc.window.guiScale.toFloat()
 
