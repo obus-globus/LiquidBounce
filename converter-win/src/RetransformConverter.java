@@ -128,10 +128,11 @@ public class RetransformConverter {
         if (!reflectMethods.isEmpty()) addReflectMethodInit(S);
         r.notes.add("reflective (private @Shadow) methods: " + reflectMethods);
 
-        // retransform is rejected if NestHost/NestMembers/Record/PermittedSubclasses differ from the loaded class; the
-        // Mixin transform can add nest members (synthetic lambda hosts) -> reset all four to the ORIGINAL's values.
-        X.nestHostClass = O.nestHostClass; X.nestMembers = O.nestMembers;
-        X.permittedSubclasses = O.permittedSubclasses; X.recordComponents = O.recordComponents;
+        // Retransform must publish the loaded class's exact JVM-visible schema. Mixin can reorder overwritten methods
+        // and @Mutable deliberately clears ACC_FINAL on @Shadow fields; both are useful while producing X but neither
+        // is legal to publish over an already-loaded class. Put the surviving transformed members back in O's order
+        // and restore their original modifiers/structural attributes while retaining X's transformed method bodies.
+        restoreOriginalSchema(O, X);
         r.target = write(X, original);
         // emit sidecar + state as one combined verify pass isn't needed; caller defines both
         r.sidecar = write(S, null);
@@ -144,6 +145,81 @@ public class RetransformConverter {
     byte[] stateBytes;
     public byte[] stateBytes() { return stateBytes; }
     public String stateName() { return stateName; }
+
+    static void restoreOriginalSchema(ClassNode O, ClassNode X) {
+        if (O.version != X.version) throw schemaFailure(O.name, "class version changed from " + O.version + " to " + X.version);
+        if (!Objects.equals(O.name, X.name)) throw schemaFailure(O.name, "class name changed to " + X.name);
+        if (!Objects.equals(O.superName, X.superName)) throw schemaFailure(O.name, "superclass changed from " + O.superName + " to " + X.superName);
+        int classKind = Opcodes.ACC_INTERFACE | Opcodes.ACC_ANNOTATION | Opcodes.ACC_ENUM | Opcodes.ACC_MODULE | Opcodes.ACC_RECORD;
+        if (((O.access ^ X.access) & classKind) != 0) throw schemaFailure(O.name, "class kind modifiers changed");
+        if (O.interfaces.size() != X.interfaces.size() || !new HashSet<>(O.interfaces).equals(new HashSet<>(X.interfaces)))
+            throw schemaFailure(O.name, "original interface set changed from " + O.interfaces + " to " + X.interfaces);
+        X.version = O.version;
+        X.access = O.access;
+        X.name = O.name;
+        X.signature = O.signature;
+        X.superName = O.superName;
+        X.interfaces = new ArrayList<>(O.interfaces);
+        X.outerClass = O.outerClass;
+        X.outerMethod = O.outerMethod;
+        X.outerMethodDesc = O.outerMethodDesc;
+        X.nestHostClass = O.nestHostClass;
+        X.nestMembers = copy(O.nestMembers);
+        X.permittedSubclasses = copy(O.permittedSubclasses);
+        X.recordComponents = O.recordComponents == null ? null : new ArrayList<>(O.recordComponents);
+        X.innerClasses = O.innerClasses == null ? null : new ArrayList<>(O.innerClasses);
+
+        LinkedHashMap<String,FieldNode> fields = new LinkedHashMap<>();
+        for (FieldNode f : X.fields) putUnique(fields, f.name + " " + f.desc, f, "field", X.name);
+        List<FieldNode> orderedFields = new ArrayList<>(O.fields.size());
+        for (FieldNode of : O.fields) {
+            String key = of.name + " " + of.desc;
+            FieldNode xf = fields.remove(key);
+            if (xf == null) throw schemaFailure(X.name, "missing field " + key);
+            if (((of.access ^ xf.access) & Opcodes.ACC_STATIC) != 0)
+                throw schemaFailure(X.name, "field static kind changed for " + key);
+            xf.access = of.access;
+            xf.signature = of.signature;
+            xf.value = of.value;
+            orderedFields.add(xf);
+        }
+        if (!fields.isEmpty()) throw schemaFailure(X.name, "extra fields " + fields.keySet());
+        X.fields = orderedFields;
+
+        LinkedHashMap<String,MethodNode> methods = new LinkedHashMap<>();
+        for (MethodNode m : X.methods) putUnique(methods, m.name + " " + m.desc, m, "method", X.name);
+        List<MethodNode> orderedMethods = new ArrayList<>(O.methods.size());
+        for (MethodNode om : O.methods) {
+            String key = om.name + " " + om.desc;
+            MethodNode xm = methods.remove(key);
+            if (xm == null) throw schemaFailure(X.name, "missing method " + key);
+            int codeKind = Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE;
+            if (((om.access ^ xm.access) & codeKind) != 0)
+                throw schemaFailure(X.name, "method static/abstract/native kind changed for " + key);
+            boolean originalHasCode = (om.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) == 0;
+            boolean transformedHasCode = xm.instructions != null && xm.instructions.size() != 0;
+            if (originalHasCode != transformedHasCode)
+                throw schemaFailure(X.name, "method code kind changed for " + key);
+            xm.access = om.access;
+            xm.signature = om.signature;
+            xm.exceptions = copy(om.exceptions);
+            orderedMethods.add(xm);
+        }
+        if (!methods.isEmpty()) throw schemaFailure(X.name, "extra methods " + methods.keySet());
+        X.methods = orderedMethods;
+    }
+
+    static <T> List<T> copy(List<T> values) {
+        return values == null ? null : new ArrayList<>(values);
+    }
+
+    static <T> void putUnique(Map<String,T> values, String key, T value, String kind, String owner) {
+        if (values.put(key, value) != null) throw schemaFailure(owner, "duplicate " + kind + " " + key);
+    }
+
+    static IllegalStateException schemaFailure(String owner, String detail) {
+        return new IllegalStateException("Cannot restore original schema for " + owner + ": " + detail);
+    }
 
     // ---- sidecar helpers ----
     static MethodNode defaultCtor(String superName) {
@@ -729,8 +805,12 @@ public class RetransformConverter {
 
     // ---- io ----
     static ClassNode read(byte[] b) { ClassReader r = new ClassReader(b); ClassNode n = new ClassNode(); r.accept(n, ClassReader.SKIP_FRAMES); return n; }
-    /** Re-emit a candidate using the JVM-supplied retransform buffer as the constant-pool basis. */
-    public static byte[] rebase(byte[] candidate, byte[] actualBaseline) { return write(read(candidate), actualBaseline); }
+    /** Normalize against and re-emit from the authoritative JVM-supplied retransform buffer. */
+    public static byte[] rebase(byte[] candidate, byte[] actualBaseline) {
+        ClassNode baseline = read(actualBaseline), rebased = read(candidate);
+        restoreOriginalSchema(baseline, rebased);
+        return write(rebased, actualBaseline);
+    }
     /** reads class metadata (superName / interfaces / isInterface) WITHOUT loading the class; set by the agent. */
     public static java.util.function.Function<String,byte[]> CLASS_BYTES;
     /** [BUG22 FIX] When emitting a class that will be REDEFINED over an already-loaded original (target',
