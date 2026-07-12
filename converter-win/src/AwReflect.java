@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *  type ever appears as a constant/CHECKCAST in LB's verified bytecode. Handles cached, setAccessible. Static access
  *  passes target=null. */
 public final class AwReflect {
-    private static final ClassLoader SYS = ClassLoader.getSystemClassLoader();
+    private static final ClassLoader SYS = lbrt.Platform.LOADER;
     private static final Map<String,Class<?>> KC = new ConcurrentHashMap<>();
     private static final Map<String,Field> FC = new ConcurrentHashMap<>();
     private static final Map<String,Method> MC = new ConcurrentHashMap<>();
