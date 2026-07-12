@@ -892,8 +892,17 @@ public class RetransformConverter {
         return !pkg(caller).equals(pkg(a.owner));
     }
     static Optional<MethodAccess> resolveMethodAccess(String owner,String name,String desc){
-        ArrayDeque<String> q=new ArrayDeque<>();HashSet<String> seen=new HashSet<>();q.add(owner);
-        while(!q.isEmpty()){String c=q.removeFirst();if(!seen.add(c))continue;try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)continue;ClassNode n=new ClassNode();new ClassReader(b).accept(n,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);for(MethodNode m:n.methods)if(m.name.equals(name)&&m.desc.equals(desc))return Optional.of(new MethodAccess(c,n.access,m.access));if(n.superName!=null)q.addLast(n.superName);q.addAll(n.interfaces);}catch(Throwable ignored){}}
+        // JVMS 5.4.3.3 resolves the superclass chain to exhaustion BEFORE any superinterface. Walking classes and
+        // interfaces together (BFS) let a shallow public interface method shadow a nearer package-private class
+        // method, so illegalSidecarMethod judged the call legal and emitted no reflection (fail-open) even though
+        // the JVM would bind the restrictive class method -> IllegalAccessError at runtime. Match the JVM order.
+        ArrayDeque<String> ifaces=new ArrayDeque<>();
+        for(String c=owner;c!=null;){try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)break;
+            ClassNode n=new ClassNode();new ClassReader(b).accept(n,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);
+            for(MethodNode m:n.methods)if(m.name.equals(name)&&m.desc.equals(desc))return Optional.of(new MethodAccess(c,n.access,m.access));
+            ifaces.addAll(n.interfaces);c=n.superName;}catch(Throwable ignored){break;}}
+        HashSet<String> seen=new HashSet<>();
+        while(!ifaces.isEmpty()){String c=ifaces.removeFirst();if(!seen.add(c))continue;try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)continue;ClassNode n=new ClassNode();new ClassReader(b).accept(n,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);for(MethodNode m:n.methods)if(m.name.equals(name)&&m.desc.equals(desc))return Optional.of(new MethodAccess(c,n.access,m.access));ifaces.addAll(n.interfaces);}catch(Throwable ignored){}}
         return Optional.empty();
     }
     static String pkg(String n){int i=n.lastIndexOf('/');return i<0?"":n.substring(0,i);}
