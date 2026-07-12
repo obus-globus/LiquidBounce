@@ -55,5 +55,12 @@ public final class AwReflect {
     // method invoke (target null => static)
     public static Object inv(String o, String n, String[] pt, String key, Object t, Object[] a){ try { return m(o,n,pt,key).invoke(t,a); } catch(InvocationTargetException e){ throw re(e.getCause()==null?e:e.getCause()); } catch(Throwable e){ throw re(e); } }
     public static Object newInst(String o, String[] pt, String key, Object[] a){ try { return ct(o,pt,key).newInstance(a); } catch(InvocationTargetException e){ throw re(e.getCause()==null?e:e.getCause()); } catch(Throwable e){ throw re(e); } }
+    /** Invoke a sidecar-cached Method with the same throwable semantics as bytecode invocation. Reflection wraps the
+     *  target throwable in InvocationTargetException; preserving that wrapper breaks Minecraft's catch/control flow. */
+    public static Object invokeResolved(Method method,Object target,Object[] args,String label){ try{return method.invoke(target,args);}
+        catch(InvocationTargetException e){Throwable cause=e.getCause()==null?e:e.getCause();log(label,cause);throw sneaky(cause);}
+        catch(Throwable e){log(label,e);throw sneaky(e);} }
+    private static void log(String label,Throwable t){if(label==null||t.getClass().getName().equals("net.minecraft.server.RunningOnDifferentThreadException"))return;System.out.println("[FULL] REFLECT-INVOKE-FAIL "+label+" -> "+t);t.printStackTrace(System.out);}
+    @SuppressWarnings("unchecked") private static <T extends Throwable> RuntimeException sneaky(Throwable t)throws T{throw (T)t;}
     private static RuntimeException re(Throwable e){ return e instanceof RuntimeException r ? r : new RuntimeException(e); }
 }

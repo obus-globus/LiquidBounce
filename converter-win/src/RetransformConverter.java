@@ -564,11 +564,12 @@ public class RetransformConverter {
             in.add(new InsnNode(Opcodes.AASTORE));
             slot += at[i].getSize();
         }
-        in.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/reflect/Method", "invoke", "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false));
+        in.add(new LdcInsnNode(targetInternal+"."+name+desc));
+        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, AWR, "invokeResolved", "(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false));
         if (rt.getSort() == Type.VOID) { in.add(new InsnNode(Opcodes.POP)); in.add(new InsnNode(Opcodes.RETURN)); }
         else if (rt.getSort() <= Type.DOUBLE) { unbox(in, rt); in.add(new InsnNode(rt.getOpcode(Opcodes.IRETURN))); }
         else { in.add(new TypeInsnNode(Opcodes.CHECKCAST, rt.getInternalName())); in.add(new InsnNode(Opcodes.ARETURN)); }
-        wrapTryCatch(m); m.maxStack = 8 + at.length; m.maxLocals = slot; S.methods.add(m);
+        m.maxStack = 9 + at.length; m.maxLocals = slot; S.methods.add(m);
     }
     /** resolve each private target Method reflectively in the sidecar <clinit>. */
     void addReflectMethodInit(ClassNode S) {
