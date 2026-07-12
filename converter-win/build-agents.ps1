@@ -21,7 +21,8 @@ New-Item -ItemType Directory -Force $Out | Out-Null
     (Join-Path $Src 'DuckDispatch.java') (Join-Path $Src 'JoinGate.java') `
     (Join-Path $Src 'InjectionLogger.java') (Join-Path $Src 'Platform.java') `
     (Join-Path $Src 'LoaderPlatform.java') (Join-Path $Src 'VanillaPlatform.java') `
-    (Join-Path $Src 'FabricPlatform.java') (Join-Path $Src 'NeoForgePlatform.java')
+    (Join-Path $Src 'FabricPlatform.java') (Join-Path $Src 'NeoForgePlatform.java') `
+    (Join-Path $Src 'LbLoader.java')
 if ($LASTEXITCODE -ne 0) { throw 'javac (converter) failed' }
 
 # --- 1b. focused schema/dispatch/accessor fixtures ---------------------------------------------------------

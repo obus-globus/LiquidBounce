@@ -26,6 +26,18 @@ public class RetransformConverter {
         public List<String> notes = new ArrayList<>();
     }
 
+    /** NeoForge (JPMS): sidecars cannot enter module `minecraft` (it owns net/minecraft/*), so they are RELOCATED into
+     *  an LB-owned package. Null (vanilla/Fabric) keeps the sidecar in the target's own package. When set, the sidecar
+     *  becomes cross-package for EVERY target, so the pkg(caller)!=pkg(owner) checks in illegalSidecarMethod /
+     *  rewriteRefs automatically route ALL non-public MC access (package-private included) through AwReflect — no other
+     *  logic change is needed. Must be an LB-owned package dir ending in '/', e.g. "net/ccbluex/lbrt/sc/". */
+    public static volatile String SIDECAR_PKG = null;
+    /** Injective-enough mangle: net/a/B$C -> <pkg>net_a_B_C$$LBSidecar. Target internal names are a fixed, unique set. */
+    static String sidecarInternal(String internal) {
+        return SIDECAR_PKG == null ? internal + "$$LBSidecar"
+                                   : SIDECAR_PKG + internal.replace('/', '_').replace('$', '_') + "$$LBSidecar";
+    }
+
     final String targetInternal, targetDesc, sidecar, stateName;
     final Set<String> addedFieldKeys = new HashSet<>();   // name+" "+desc
     final Set<String> addedInstanceFields = new HashSet<>(); // name (instance only)
@@ -39,7 +51,7 @@ public class RetransformConverter {
         // Sidecar lives in the TARGET'S OWN PACKAGE so relocated handler bodies keep package-private access to
         // target-package internals (e.g. a package-private inner class like GuiRenderState$Node). Only genuinely
         // PRIVATE members still need the reflective path (B). Defined with the target's ProtectionDomain.
-        this.sidecar = targetInternal + "$$LBSidecar";
+        this.sidecar = sidecarInternal(targetInternal);
         this.stateName = sidecar + "$State";
     }
 
@@ -385,7 +397,7 @@ public class RetransformConverter {
     static String gkey(String owner, String name, String desc) { return owner + " " + name + " " + desc; }
     public static void collectAdded(String internal, byte[] O, byte[] X, Map<String,String[]> gMethods, Map<String,String[]> gFields, Map<String,List<String[]>> gIfaces) {
         ClassNode o = read(O), x = read(X); Set<String> om = keysM(o), of = keysF(o);
-        String sc = internal + "$$LBSidecar";
+        String sc = sidecarInternal(internal);
         for (MethodNode m : x.methods) { String k = m.name + " " + m.desc;
             if (!om.contains(k) && !m.name.equals("<clinit>") && !m.name.equals("<init>"))
                 gMethods.put(gkey(internal, m.name, m.desc), new String[]{internal, sc, (m.access & Opcodes.ACC_STATIC) != 0 ? "1" : "0"}); }

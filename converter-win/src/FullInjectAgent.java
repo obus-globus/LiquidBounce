@@ -349,7 +349,7 @@ public class FullInjectAgent {
     /** Pick the platform by probing which loader owns the live client. Default vanilla; modded selects a stub host. */
     static LoaderPlatform detectPlatform(Instrumentation inst) throws Exception {
         if (loaderPresent(inst,"net.fabricmc.loader.impl.launch.knot.KnotClassLoader")) { InjectionLogger.info("detected Fabric (Knot) loader"); return new FabricPlatform(); }
-        if (loaderPresent(inst,"net.neoforged.fml.classloading.transformation.TransformingClassLoader")) { InjectionLogger.info("detected NeoForge (FML) loader"); return new NeoForgePlatform(); }
+        if (loaderPresent(inst,"net.neoforged.fml.classloading.transformation.TransformingClassLoader")) { InjectionLogger.info("detected NeoForge (FML) loader"); return new NeoForgePlatform(inst); }
         InjectionLogger.info("detected vanilla (system) loader"); return new VanillaPlatform();
     }
     static boolean loaderPresent(Instrumentation inst, String dotted){ for (Class<?> c : inst.getAllLoadedClasses()) if (c.getName().equals(dotted)) return true; return false; }
