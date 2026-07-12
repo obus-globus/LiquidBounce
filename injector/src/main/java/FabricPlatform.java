@@ -57,6 +57,7 @@ final class FabricPlatform implements LoaderPlatform {
     // ---- §3.2: stage LB onto Knot (deps already on the stock classpath are skipped; ASM/Mixin never pushed) ----------
     public Path stageBundle(Instrumentation inst, File agentJar) throws Exception {
         this.agentJar = agentJar;
+        exposeRuntimeToParent(agentJar);   // let Knot delegate lbrt.*/agent classes to the system loader (single identity)
         // basenames already on the process classpath -> pushing a second copy onto Knot would split class identity.
         Set<String> onCp = new HashSet<>();
         for (String p : System.getProperty("java.class.path","").split(File.pathSeparator)) { String b = new File(p).getName().toLowerCase(); if(!b.isEmpty()) onCp.add(b); }
@@ -81,6 +82,49 @@ final class FabricPlatform implements LoaderPlatform {
     private static boolean isLoaderProvided(String base){ String b=base.toLowerCase();
         return b.startsWith("asm-")||b.startsWith("asm.")||b.contains("sponge-mixin")||b.contains("mixinextras")||b.startsWith("fabric-loader"); }
     private void addToClassPath(Path jar, String... prefixes) throws Exception { mAddToClassPath.invoke(launcher, jar, prefixes); }
+
+    // ---- expose the injector runtime to Knot via PARENT delegation (NOT a second Knot-owned copy) --------------------
+    // Sidecars run on Knot but reference lbrt.* helpers (AwReflect/DuckDispatch/JoinGate), which the agent loaded on the
+    // SYSTEM loader. Knot's dev-mode isolation refuses to resolve them for game classes ("hasn't been exposed to the
+    // game") -> NoClassDefFoundError the first time a late-loaded Knot class (e.g. DisconnectedScreen) links one.
+    // Whitelisting the agent jar as a valid PARENT code source makes Knot's tryLoadClass/loadClass delegate those
+    // classes to its parent (system) loader via parentClassLoader.loadClass instead of throwing -> a SINGLE identity
+    // shared with the agent. This DELEGATES, never defineClass's a Knot-owned copy (that is what addToClassPath would
+    // do, forking the stateful helpers into two identities). lbrt.* is confirmed absent from every jar pushed onto
+    // Knot, so Knot can never own a copy -> the single-identity property is structural, not incidental.
+    //
+    // Blast radius: the whitelist is code-source-granular, so in principle ANY agent-jar-root class Knot fails to find
+    // on its own classpath would now parent-delegate rather than throw. In practice this is inert: the root also holds
+    // the agent's private Mixin/ASM/MixinExtras/vspike/converter copies, but those packages are Knot-owned (Fabric
+    // provides Mixin+ASM; isLoaderProvided refuses to push the agent's) so isValidParentUrl is never consulted for
+    // them, and the converter/vspike/agent classes are never referenced by game classes. Accepted latent risk: a class
+    // present in the agent jar but absent from Knot's (same-major) Mixin/ASM would cross-delegate silently rather than
+    // fail loud. Narrowing to parentSourcedClasses was rejected: that path can re-define from parent bytes (a second
+    // identity), which would defeat the whole point for JoinGate/DuckDispatch.
+    @SuppressWarnings("unchecked")
+    private void exposeRuntimeToParent(File agentJar) throws Exception {
+        Path agentPath = normalizeParentPath(agentJar.toPath());
+        Field f = null;
+        for (Class<?> k = delegate.getClass(); k != null && f == null; k = k.getSuperclass()) {
+            try { f = k.getDeclaredField("validParentCodeSources"); } catch (NoSuchFieldException e) { /* walk up */ }
+        }
+        if (f == null) throw new NoSuchFieldException("validParentCodeSources on " + delegate.getClass().getName());
+        f.setAccessible(true);
+        Set<Path> cur = (Set<Path>) f.get(delegate);
+        // Rebuild the whole set and publish once via the volatile field (safe concurrent read; never mutated after).
+        Set<Path> next = new HashSet<>();
+        if (cur != null) next.addAll(cur);
+        boolean added = next.add(agentPath);
+        f.set(delegate, next);
+        InjectionLogger.info("exposed injector runtime to Knot via parent delegation (" + (added ? "added " : "already present ")
+            + agentPath + "; validParentCodeSources=" + next.size() + ")");
+    }
+    /** Normalize the same way Knot stores valid-parent paths, so isValidParentUrl's Path comparison matches. */
+    private static Path normalizeParentPath(Path p) {
+        try { return (Path) Class.forName("net.fabricmc.loader.impl.util.LoaderUtil")
+            .getMethod("normalizeExistingPath", Path.class).invoke(null, p); }
+        catch (Throwable t) { try { return p.toRealPath(); } catch (Exception e) { return p.toAbsolutePath().normalize(); } }
+    }
 
     // ---- §1c/§3.3: register LB configs into the LIVE Knot Mixin (required:false), apply AW to Knot, grab transformer -
     public void initMixin() throws Exception {
