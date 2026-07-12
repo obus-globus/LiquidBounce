@@ -435,7 +435,11 @@ public class RetransformConverter {
                         m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "refGet$" + fi.name, "(" + targetDesc + ")" + fi.desc, false));
                     else
                         m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "refSet$" + fi.name, "(" + targetDesc + fi.desc + ")V", false));
-                }
+                } else if (inSidecar && nonPublicField(fi.owner,fi.name,fi.desc)) rewriteFieldAw(m,fi);
+            } else if (inSidecar && p instanceof FieldInsnNode fi && nonPublicField(fi.owner,fi.name,fi.desc)) {
+                // Relocated handlers are no longer subclasses/nestmates of their target. Protected or package-private
+                // fields inherited from another package (for example Screen.minecraft) must therefore use reflection.
+                rewriteFieldAw(m,fi);
             } else if (p instanceof MethodInsnNode mi && addedCallTarget(mi) != null) {
                 // call to a mixin-ADDED method (relocated to a sidecar). GADDED spans ALL targets, so a call to a base
                 // class's @Unique method from a subclass mixin's relocated body routes to the BASE class's sidecar.
@@ -835,6 +839,10 @@ public class RetransformConverter {
     }
     // --- correct getCommonSuperClass by reading class bytes (no classloading, no init) ---
     static final Map<String,String[]> META = new HashMap<>();   // internal -> [superName, isInterface?"1":"0", iface...]
+    static final java.util.concurrent.ConcurrentHashMap<String,Boolean> NON_PUBLIC_FIELDS = new java.util.concurrent.ConcurrentHashMap<>();
+    static boolean nonPublicField(String owner,String name,String desc){String key=owner+'\0'+name+' '+desc;Boolean cached=NON_PUBLIC_FIELDS.get(key);if(cached!=null)return cached;
+        boolean result=false;String c=owner;int guard=0;while(c!=null&&!c.equals("java/lang/Object")&&guard++<64){try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)break;ClassReader cr=new ClassReader(b);ClassNode n=new ClassNode();cr.accept(n,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);boolean found=false;for(FieldNode f:n.fields)if(f.name.equals(name)&&f.desc.equals(desc)){result=(f.access&Opcodes.ACC_PUBLIC)==0;found=true;break;}if(found)break;c=cr.getSuperName();}catch(Throwable t){break;}}
+        Boolean raced=NON_PUBLIC_FIELDS.putIfAbsent(key,result);return raced==null?result:raced;}
     static String[] meta(String cn) {
         String[] m = META.get(cn); if (m != null) return m;
         try {

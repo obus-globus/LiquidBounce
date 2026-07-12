@@ -42,6 +42,7 @@ public final class ConverterAutoTests {
         testSyntheticScanSkipsSelf();
         testReentrantCacheResolution();
         testResolvedInvocationPreservesCause();
+        testInheritedProtectedFieldLowering();
         System.out.println("[AUTO-TEST] all converter automation fixtures passed");
     }
 
@@ -204,6 +205,21 @@ public final class ConverterAutoTests {
         catch(RuntimeException actual){yes(actual==expected);}
     }
 
+    static void testInheritedProtectedFieldLowering() {
+        String base="fixture/base/ProtectedBase",child="fixture/sub/ProtectedChild";
+        byte[] baseBytes=protectedBaseFixture(base),original=inheritedFieldFixture(child,base,false),mixed=inheritedFieldFixture(child,base,true);
+        var old=RetransformConverter.CLASS_BYTES;RetransformConverter.CLASS_BYTES=n->n.equals(base)?baseBytes:n.equals(child)?original:null;
+        try{
+            RetransformConverter converter=new RetransformConverter(child);RetransformConverter.Result result=converter.run(original,mixed);
+            ClassNode sidecar=new ClassNode();new ClassReader(result.sidecar).accept(sidecar,0);boolean direct=false,reflected=false;
+            for(MethodNode m:sidecar.methods)for(AbstractInsnNode p=m.instructions.getFirst();p!=null;p=p.getNext()){
+                if(p instanceof FieldInsnNode f&&f.owner.equals(base)&&f.name.equals("minecraft"))direct=true;
+                if(p instanceof MethodInsnNode call&&call.owner.equals("lbrt/AwReflect")&&call.name.equals("gO"))reflected=true;
+            }
+            no(direct);yes(reflected);
+        }finally{RetransformConverter.CLASS_BYTES=old;}
+    }
+
     static byte[] callerFixture(String owner,String iface){ClassWriter w=new ClassWriter(ClassWriter.COMPUTE_FRAMES|ClassWriter.COMPUTE_MAXS);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"call","(Ljava/lang/Object;)Ljava/lang/String;",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.CHECKCAST,iface);m.visitMethodInsn(Opcodes.INVOKEINTERFACE,iface,"value","()Ljava/lang/String;",true);m.visitInsn(Opcodes.ARETURN);m.visitMaxs(0,0);m.visitEnd();m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"isDuck","(Ljava/lang/Object;)Z",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.INSTANCEOF,iface);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(0,0);m.visitEnd();m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"callWide","(Ljava/lang/Object;JD)I",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitTypeInsn(Opcodes.CHECKCAST,iface);m.visitVarInsn(Opcodes.LLOAD,1);m.visitVarInsn(Opcodes.DLOAD,3);m.visitMethodInsn(Opcodes.INVOKEINTERFACE,iface,"wide","(JD)I",true);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(0,0);m.visitEnd();w.visitEnd();return w.toByteArray();}
     static byte[] accessorFixture(String owner,String target){ClassWriter w=new ClassWriter(ClassWriter.COMPUTE_FRAMES|ClassWriter.COMPUTE_MAXS);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT|Opcodes.ACC_INTERFACE,owner,null,"java/lang/Object",null);addMixin(w,target);addAccessorStub(w,"getSecret","()Ljava/lang/String;","SECRET");addAccessorStub(w,"getNumber","()I","NUMBER");addAccessorStub(w,"setNumber","(I)V","NUMBER");MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"createAccessorTarget","(Ljava/lang/String;)L"+target+";",null,null);m.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Invoker;",false).visitEnd();stub(m);w.visitEnd();return w.toByteArray();}
     static byte[] abstractAccessorFixture(String owner,String target){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT|Opcodes.ACC_INTERFACE,owner,null,"java/lang/Object",null);addMixin(w,target);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_ABSTRACT,"getValue","()Ljava/lang/String;",null,null);m.visitAnnotation("Lorg/spongepowered/asm/mixin/gen/Accessor;",false).visitEnd();m.visitEnd();w.visitEnd();return w.toByteArray();}
@@ -216,6 +232,8 @@ public final class ConverterAutoTests {
     static byte[] mutableSchemaFixture(String owner,boolean isFinal,boolean reverseMethods,int value,int version){ClassWriter w=new ClassWriter(0);w.visit(version,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);w.visitField(Opcodes.ACC_PRIVATE|(isFinal?Opcodes.ACC_FINAL:0),"state","I",null,null).visitEnd();MethodVisitor c=w.visitMethod(Opcodes.ACC_PUBLIC,"<init>","()V",null,null);c.visitCode();c.visitVarInsn(Opcodes.ALOAD,0);c.visitMethodInsn(Opcodes.INVOKESPECIAL,"java/lang/Object","<init>","()V",false);c.visitInsn(Opcodes.RETURN);c.visitMaxs(1,1);c.visitEnd();if(reverseMethods){constantMethod(w,"second",3);constantMethod(w,"first",value);}else{constantMethod(w,"first",value);constantMethod(w,"second",3);}w.visitEnd();return w.toByteArray();}
     static void constantMethod(ClassWriter w,String name,int value){MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC,name,"()I",null,null);m.visitCode();m.visitInsn(Opcodes.ICONST_0+value);m.visitInsn(Opcodes.IRETURN);m.visitMaxs(1,1);m.visitEnd();}
     static byte[] syntheticFixture(String self,String dependency){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,self,null,"java/lang/Object",null);MethodVisitor m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"touch","()V",null,null);m.visitCode();m.visitTypeInsn(Opcodes.NEW,dependency);m.visitInsn(Opcodes.POP);m.visitInsn(Opcodes.RETURN);m.visitMaxs(1,0);m.visitEnd();w.visitEnd();return w.toByteArray();}
+    static byte[] protectedBaseFixture(String owner){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,"java/lang/Object",null);w.visitField(Opcodes.ACC_PROTECTED,"minecraft","Ljava/lang/Object;",null,null).visitEnd();w.visitEnd();return w.toByteArray();}
+    static byte[] inheritedFieldFixture(String owner,String base,boolean handler){ClassWriter w=new ClassWriter(0);w.visit(Opcodes.V25,Opcodes.ACC_PUBLIC,owner,null,base,null);if(handler){MethodVisitor m=w.visitMethod(Opcodes.ACC_PRIVATE,"handler$inventory","()Ljava/lang/Object;",null,null);m.visitCode();m.visitVarInsn(Opcodes.ALOAD,0);m.visitFieldInsn(Opcodes.GETFIELD,base,"minecraft","Ljava/lang/Object;");m.visitInsn(Opcodes.ARETURN);m.visitMaxs(1,1);m.visitEnd();}w.visitEnd();return w.toByteArray();}
 
     static String internal(Class<?> c){return c.getName().replace('.','/');}
     static byte[] bytesOf(Class<?> c)throws Exception{try(InputStream in=c.getClassLoader().getResourceAsStream(internal(c)+".class")){return Objects.requireNonNull(in).readAllBytes();}}
