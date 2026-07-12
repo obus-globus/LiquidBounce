@@ -1,15 +1,6 @@
-import org.spongepowered.asm.launch.MixinBootstrap;
-import org.spongepowered.asm.launch.platform.MixinPlatformManager;
-import org.spongepowered.asm.launch.platform.CommandLineOptions;
-import org.spongepowered.asm.mixin.Mixins;
-import org.spongepowered.asm.mixin.MixinEnvironment;
-import org.spongepowered.asm.mixin.MixinEnvironment.Side;
-import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
-import org.spongepowered.asm.service.MixinService;
 import org.objectweb.asm.ClassReader;
 import java.io.*; import java.lang.instrument.*; import java.lang.reflect.Method;
 import java.nio.file.*; import java.security.ProtectionDomain; import java.util.*; import java.util.concurrent.*; import java.util.jar.*;
-import vspike.VSpikeService;
 import lbrt.InjectionLogger;
 
 /** MILESTONE 2/3: attach to a fully-running MC and inject FULL LiquidBounce. Uniform-convert every mixin
@@ -19,7 +10,6 @@ public class FullInjectAgent {
     static LoaderPlatform PLATFORM;                                               // loader-specific seams (vanilla/Fabric/NeoForge)
     static ClassLoader SYS;                                                       // == PLATFORM.targetLoader(); holds net.minecraft.* + staged LB
     static final boolean DEBUG = Boolean.getBoolean("lb.agent.debug");
-    static IMixinTransformer tr; static MixinEnvironment env;
     static final Set<String> definedSynth = ConcurrentHashMap.newKeySet();
     static final Set<String> definingSynth = ConcurrentHashMap.newKeySet();
     static final Map<String,Conv> convMap = new ConcurrentHashMap<>();             // internal -> conversion holder
@@ -56,7 +46,6 @@ public class FullInjectAgent {
         Path lbBundle = PLATFORM.stageBundle(inst, self);
 
         PLATFORM.initMixin();
-        tr = PLATFORM.transformer(); env = PLATFORM.environment();
         Object aw = PLATFORM.accessWidener();
         // Inaccessible types: AW-widened classes that are ALREADY loaded (so can't be widened) and still non-public.
         // LB references these by type; the CFT erases those references to Object + reflection.
@@ -69,6 +58,7 @@ public class FullInjectAgent {
         List<String> targets = new ArrayList<>();
         try (var r = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(PLATFORM.bundleResource("lb-mixin-targets.txt"))))) { String l; while ((l=r.readLine())!=null) if(!l.isBlank()) targets.add(l.trim().replace('.','/')); }
         targetSet.addAll(targets);
+        PLATFORM.prepareBaselines(targets);   // Fabric: capture the non-LB mod baseline before LB's config is selected
 
         // Convert transactionally. Nothing is published/defined until every transformed target verifies, because the
         // global relocation tables permit cross-target sidecar calls and therefore cannot be safely partially accepted.
@@ -84,7 +74,7 @@ public class FullInjectAgent {
         List<String> phaseFailures = new ArrayList<>();
         for (String internal : targets) { try {
             byte[] O = PLATFORM.originalBytes(internal); if(O==null) continue;
-            byte[] X = tr.transformClassBytes(internal.replace('/','.'), internal.replace('/','.'), O); if (X==null || Arrays.equals(X,O)) continue;
+            byte[] X = PLATFORM.transform(internal.replace('/','.'), O); if (X==null) continue;
             txMap.put(internal, new byte[][]{O, X}); RetransformConverter.collectAdded(internal, O, X, gadded, gfield, giface);
         } catch (Throwable e) { phaseFailures.add(internal); LateAttachVerifier.error("MIXIN_TRANSFORM_FAILURE",internal,"target",rootMsg(e)); InjectionLogger.error("transform fail "+internal+" -> "+rootMsg(e)); } }
         RetransformConverter.GADDED = gadded; RetransformConverter.GFIELD = gfield; RetransformConverter.GIFACE = giface;
@@ -200,10 +190,10 @@ public class FullInjectAgent {
                 // fires the event into an empty listener set; the readiness waiter then initializes LiquidBounce on
                 // its own background thread after the event was already lost, causing module singleton races.
                 Class.forName("net.ccbluex.liquidbounce.LiquidBounce", true, SYS);
-                Class<?> em = Class.forName("net.ccbluex.liquidbounce.event.EventManager");
+                Class<?> em = Class.forName("net.ccbluex.liquidbounce.event.EventManager", true, SYS);
                 Object emInst = em.getField("INSTANCE").get(null);
-                Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientStartEvent").getField("INSTANCE").get(null);
-                java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event"));
+                Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientStartEvent", true, SYS).getField("INSTANCE").get(null);
+                java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event", true, SYS));
                 if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
                 thaw = RegistryThawSession.begin();
                 InjectionLogger.info("(MC main thread) callEvent(ClientStartEvent)");
@@ -257,7 +247,7 @@ public class FullInjectAgent {
                 if(definedSynth.contains(d)||definingSynth.contains(d))continue;
                 definingSynth.add(d);boolean one=false;
                 try{
-                    byte[] sb=tr.generateClass(env,d);
+                    byte[] sb=PLATFORM.generateClass(d);
                     if(sb==null)syntheticError("SYNTHETIC_GENERATE_FAILURE",d,"Mixin transformer returned no bytes");
                     else if(!defineSynthetics(sb,pd))syntheticError("SYNTHETIC_DEPENDENCY_FAILURE",d,"A generated synthetic dependency failed");
                     else if(!define(d,sb,d.startsWith("org.spongepowered.")?null:pd))syntheticError("SYNTHETIC_DEFINE_FAILURE",d,"Generated class could not be defined");

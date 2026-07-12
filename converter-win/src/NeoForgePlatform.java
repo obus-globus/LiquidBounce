@@ -1,5 +1,3 @@
-import org.spongepowered.asm.mixin.MixinEnvironment;
-import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
 import java.io.File; import java.lang.instrument.Instrumentation; import java.nio.file.Path; import java.security.ProtectionDomain;
 
 /** STUB — NeoForge (FML / TransformingClassLoader) late-attach platform. See converter-win/design/NEOFORGE-LATE-ATTACH.md.
@@ -11,9 +9,9 @@ final class NeoForgePlatform implements LoaderPlatform {
     public Path stageBundle(Instrumentation inst, File agentJar){ throw nyi(); }
     /** §1c/§3.2 — register LB configs into the LIVE FMLMixinService (emitRegister); no second service standup. */
     public void initMixin(){ throw nyi(); }
-    /** §1c — borrow FML's live IMixinTransformer. */
-    public IMixinTransformer transformer(){ throw nyi(); }
-    public MixinEnvironment environment(){ throw nyi(); }
+    /** §1c — borrow FML's live transformer (behind reflection). */
+    public byte[] transform(String dotted, byte[] originalO){ throw nyi(); }
+    public byte[] generateClass(String dotted){ throw nyi(); }
     /** §1e — live-class Resolver drives already-loaded non-public access; AW parsed as data. */
     public Object accessWidener(){ throw nyi(); }
     /** §1e — FML's AccessTransformerEngine widens FUTURE classes on load, so the CFT does NOT apply AW itself. */

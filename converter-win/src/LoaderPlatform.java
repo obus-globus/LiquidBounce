@@ -1,5 +1,3 @@
-import org.spongepowered.asm.mixin.MixinEnvironment;
-import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
 import java.io.File; import java.lang.instrument.Instrumentation; import java.nio.file.Path; import java.security.ProtectionDomain;
 
 /** Host-side abstraction over the loader-specific seams FullInjectAgent needs. Vanilla stands up its OWN Sponge Mixin
@@ -15,11 +13,26 @@ interface LoaderPlatform {
      *  the extracted liquidbounce.jar (for caller preflight). agentJar is the agent's own jar. */
     Path stageBundle(Instrumentation inst, File agentJar) throws Exception;
 
-    /** Coupling #3: stand up (vanilla) or acquire (modded) the Mixin service, register LB configs, and expose the
-     *  transformer/environment used to compute X and generate synthetics. Call once, after stageBundle. */
+    /** Coupling #3: stand up (vanilla) or acquire (modded) the Mixin service and register LB configs. Call once,
+     *  after stageBundle. The transformer itself stays loader-internal (Fabric's lives on Knot / behind reflection). */
     void initMixin() throws Exception;
-    IMixinTransformer transformer();
-    MixinEnvironment environment();
+
+    /** Coupling #3: (Fabric-only) pre-compute the schema baseline for each target while LB's late-added config is still
+     *  unvisited, so `originalBytes(target)` returns the "all OTHER mods applied, LB not yet" plane. On Fabric the live
+     *  Knot transformer re-applies the whole mod mixin stack (fabric-api/iris/sodium/...) on every call, so the diff
+     *  baseline must be that stack MINUS LB — otherwise every other mod's additions are misattributed to LB. No-op on
+     *  loaders whose transformer only carries LB's mixins (vanilla). Call once, right before phase A. */
+    default void prepareBaselines(java.util.List<String> internalTargets) throws Exception {}
+
+    /** Coupling #3: mixin-transform a target and return X (the mixin output), or null if the mixin did not change the
+     *  input (nothing to convert). `originalO` is the schema baseline (originalBytes); the platform chooses the actual
+     *  transform INPUT (vanilla: originalO; Fabric: the pre-mixin/AW-applied plane) and hides its own IMixinTransformer,
+     *  so this handle is loader-neutral (Fabric's transformer object is Knot-loaded, not castable on the system loader). */
+    byte[] transform(String dotted, byte[] originalO) throws Exception;
+
+    /** Coupling #3: generate a Mixin synthetic class by name (org.spongepowered.asm.synthetic.* / $Anonymous$), or null
+     *  if none is produced (on Fabric Knot auto-generates most synthetics, so null is normal). */
+    byte[] generateClass(String dotted);
 
     /** Coupling #4: the parsed AccessWidener (as data, for the already-loaded INACC/Resolver computation). */
     Object accessWidener();
