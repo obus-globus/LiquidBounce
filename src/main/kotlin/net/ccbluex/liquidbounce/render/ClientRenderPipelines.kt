@@ -29,6 +29,7 @@ import com.mojang.blaze3d.pipeline.DepthStencilState
 import com.mojang.blaze3d.pipeline.RenderPipeline
 import com.mojang.blaze3d.platform.CompareOp
 import com.mojang.blaze3d.shaders.ShaderSource
+import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.vertex.DefaultVertexFormat
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
 import net.ccbluex.fastutil.fastIterator
@@ -496,6 +497,9 @@ object ClientRenderPipelines {
      */
     fun ensureCompiled() {
         if (precompiled) return
+        // Mutates the device's (unsynchronised) pipeline/shader caches and issues GL calls — enforce the
+        // render-thread contract rather than only documenting it.
+        RenderSystem.assertOnRenderThread()
 
         precompile()
 
@@ -507,6 +511,11 @@ object ClientRenderPipelines {
             logger.warn("Render pipelines were lazily compiled before precompile; resetting pipeline cache.")
             gpuDevice.clearPipelineCache()
             precompile()
+            // Still invalid after a clean reset: log once. `precompiled` stays latched (set by precompile) so we
+            // do not thrash a full recompile every frame — the custom-shader layer is degraded but the client is stable.
+            if (!gpuDevice.precompilePipeline(JCEF.BGRA_BLURRED_TEXTURE, shaderSource).isValid) {
+                logger.error("JCEF render pipeline still failed to compile after cache reset; custom UI shaders unavailable.")
+            }
         }
     }
 
