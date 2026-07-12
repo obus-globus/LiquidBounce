@@ -1,0 +1,16 @@
+2026-07-12T21:15:55.566089300Z main WARN Advanced terminal features are not available in this environment
+WARNING: A Java agent has been loaded dynamically (C:\Dev\ProjectsSorted\LiquidBounceSpecial\LiquidBounce\build\full-agent\full-agent.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+Exception in thread "OkHttpClient Dispatcher 4" net.ccbluex.liquidbounce.api.core.HttpException: GET https://api.liquidbounce.net/api/v1/version/newest/feat/vanilla-agent failed with code 404: 
+	at lb-agent-loader//net.ccbluex.liquidbounce.api.core.HttpClient.clientHttpApiInterceptor$lambda$0(HttpClient.kt:163)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at net.ccbluex.liquidbounce.authlib.interceptor.DefaultHeaderInterceptor.intercept(DefaultHeaderInterceptor.kt:13)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at lb-agent-loader//net.ccbluex.liquidbounce.api.interceptors.CacheBlacklistInterceptor.intercept(CacheBlacklistInterceptor.kt:37)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:332)
+	at okhttp3.internal.connection.RealCall.getResponseWithInterceptorChain$okhttp(RealCall.kt:232)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:580)
+	at java.base/java.util.concurrent.ThreadPerTaskExecutor$TaskRunner.run(ThreadPerTaskExecutor.java:291)
+	at java.base/java.lang.VirtualThread.run(VirtualThread.java:456)
