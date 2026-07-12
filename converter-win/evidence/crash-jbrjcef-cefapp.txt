@@ -1,0 +1,138 @@
+---- Minecraft Crash Report ----
+// My bad.
+
+Time: 2026-07-12 12:55:19
+Description: Unexpected error
+
+java.lang.NoSuchMethodError: 'org.cef.CefApp org.cef.CefApp.getInstance(java.lang.String[], org.cef.CefSettings)'
+	at net.ccbluex.liquidbounce.mcef.cef.CefHelper.init(CefHelper.java:127)
+	at net.ccbluex.liquidbounce.mcef.MCEF.initialize(MCEF.java:75)
+	at net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowserBackend.start(CefBrowserBackend.kt:158)
+	at net.ccbluex.liquidbounce.integration.backend.BrowserBackendManager.start(BrowserBackendManager.kt:90)
+	at net.ccbluex.liquidbounce.integration.backend.BrowserBackendManager$makeDependenciesAvailable$1.invoke(BrowserBackendManager.kt:76)
+	at net.ccbluex.liquidbounce.integration.backend.BrowserBackendManager$makeDependenciesAvailable$1.invoke(BrowserBackendManager.kt:76)
+	at net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowserBackend$makeDependenciesAvailable$2.invokeSuspend$lambda$0$0(CefBrowserBackend.kt:108)
+	at net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:173)
+	at net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:23)
+	at net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:147)
+	at net.minecraft.util.thread.BlockableEventLoop.runAllTasks(BlockableEventLoop.java:127)
+	at net.minecraft.client.Minecraft.runTick(Minecraft.java:1235)
+	at net.minecraft.client.Minecraft.run(Unknown Source)
+	at net.minecraft.client.main.Main.main(Main.java:292)
+
+
+A detailed walkthrough of the error, its code path and all known details is as follows:
+---------------------------------------------------------------------------------------
+
+-- Head --
+Thread: Render thread
+Stacktrace:
+	at net.ccbluex.liquidbounce.mcef.cef.CefHelper.init(CefHelper.java:127)
+	at net.ccbluex.liquidbounce.mcef.MCEF.initialize(MCEF.java:75)
+	at net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowserBackend.start(CefBrowserBackend.kt:158)
+	at net.ccbluex.liquidbounce.integration.backend.BrowserBackendManager.start(BrowserBackendManager.kt:90)
+	at net.ccbluex.liquidbounce.integration.backend.BrowserBackendManager$makeDependenciesAvailable$1.invoke(BrowserBackendManager.kt:76)
+	at net.ccbluex.liquidbounce.integration.backend.BrowserBackendManager$makeDependenciesAvailable$1.invoke(BrowserBackendManager.kt:76)
+	at net.ccbluex.liquidbounce.integration.backend.backends.cef.CefBrowserBackend$makeDependenciesAvailable$2.invokeSuspend$lambda$0$0(CefBrowserBackend.kt:108)
+	at net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:173)
+	at net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:23)
+	at net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:147)
+
+-- Uptime --
+Details:
+	JVM uptime: 98.548s
+	Wall uptime: 81.705s
+	High-res time: 81.447s
+	Client ticks: 1383 ticks / 69.150s
+Stacktrace:
+	at net.minecraft.client.Minecraft.fillReport(Minecraft.java:2496)
+	at net.minecraft.client.Minecraft.emergencySaveAndCrash(Minecraft.java:1008)
+	at net.minecraft.client.Minecraft.run(Unknown Source)
+	at net.minecraft.client.main.Main.main(Main.java:292)
+
+-- Last reload --
+Details:
+	Reload number: 1
+	Reload reason: initial
+	Finished: Yes
+	Packs: vanilla
+
+-- System Details --
+Details:
+	Minecraft Version: 26.2
+	Minecraft Version ID: 26.2
+	Operating System: Windows 11 (amd64) version 10.0
+	Java Version: 25.0.3, JetBrains s.r.o.
+	Java VM Version: OpenJDK 64-Bit Server VM (mixed mode, sharing), JetBrains s.r.o.
+	Memory: 96428296 bytes (91 MiB) / 538968064 bytes (514 MiB) up to 2147483648 bytes (2048 MiB)
+	Memory (heap): init: 1024MiB, used: 421MiB, committed: 514MiB, max: 2048MiB
+	Memory (non-head): init: 007MiB, used: 196MiB, committed: 198MiB, max: 000MiB
+	CPUs: 12
+	Processor Vendor: AuthenticAMD
+	Processor Name: AMD Ryzen 5 5600X 6-Core Processor             
+	Identifier: AuthenticAMD Family 25 Model 33 Stepping 2
+	Microarchitecture: Zen 3
+	Frequency (GHz): 3.70
+	Number of physical packages: 1
+	Number of physical CPUs: 6
+	Number of logical CPUs: 12
+	Graphics card #0 name: NVIDIA GeForce RTX 5060 Ti
+	Graphics card #0 vendor: NVIDIA
+	Graphics card #0 VRAM (MiB): 16311.00
+	Graphics card #0 deviceId: VideoController1
+	Graphics card #0 versionInfo: 32.0.16.1074
+	Memory slot #0 capacity (MiB): 16384.00
+	Memory slot #0 clockSpeed (GHz): 3.20
+	Memory slot #0 type: DDR4
+	Memory slot #1 capacity (MiB): 16384.00
+	Memory slot #1 clockSpeed (GHz): 3.20
+	Memory slot #1 type: DDR4
+	Memory slot #2 capacity (MiB): 16384.00
+	Memory slot #2 clockSpeed (GHz): 3.20
+	Memory slot #2 type: DDR4
+	Memory slot #3 capacity (MiB): 16384.00
+	Memory slot #3 clockSpeed (GHz): 3.20
+	Memory slot #3 type: DDR4
+	Virtual memory max (MiB): 72373.88
+	Virtual memory used (MiB): 44900.12
+	Swap memory total (MiB): 6912.00
+	Swap memory used (MiB): 254.61
+	Space in storage for jna.tmpdir (MiB): <path not set>
+	Space in storage for org.lwjgl.system.SharedLibraryExtractPath (MiB): <path not set>
+	Space in storage for io.netty.native.workdir (MiB): <path not set>
+	Space in storage for java.io.tmpdir (MiB): available: 467454.00, total: 1952682.00
+	Space in storage for workdir (MiB): available: 467454.00, total: 1952682.00
+	Operating System Version: Microsoft Windows 11 build 22635
+	Process Elevated: false
+	Process Loads: Uptime: 98s, user: 43s (43.24%), kernel: 3s (3.54%), total: 46s (46.78%)
+	Process Virtual Size (MiB): 2060.89
+	Process Resident Size (MiB): 1262.75
+	JVM Flags: 1 total; -Xmx2g
+	Debug Flags: 0 total; 
+	Launched Version: 26.2
+	Backend library: LWJGL version 3.4.1+2
+	Window size: 852x532
+	Surface Info: FIFO, 852 x 532
+	GFLW Platform: win32
+	Graphics Device: NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+	Graphics Backend: OpenGL
+	Graphics Vendor: NVIDIA Corporation
+	Graphics Drivers: 3.3.0 NVIDIA 610.74
+	Graphics Device Extensions: GL_ARB_multi_draw_indirect, GL_ARB_buffer_storage, GL_ARB_shader_draw_parameters, GL_ARB_base_instance, GL_KHR_debug, GL_ARB_draw_indirect, GL_ARB_clip_control, GL_ARB_vertex_attrib_binding, GL_ARB_direct_state_access, GL_EXT_texture_filter_anisotropic
+	Graphics Device Type: OTHER
+	Graphics Device Features: DeviceFeatures[shaderDrawParameters=true, multiDrawDirectInterleaved=false, multiDrawDirectSeparate=true, multiDrawIndirect=true, drawIndirect=true, nonZeroFirstInstance=true, persistentMapping=true]
+	GL debug messages: 
+	Is Modded: Probably not. Client jar signature and brand is untouched
+	Universe: 400921fb54442d18
+	Type: Client
+	Transparency: regular
+	Render Distance: 6/6 chunks
+	Narrator config: OFF
+	Narrator status: false
+	Resource Packs: vanilla
+	Sound Cache: 0 bytes in 0 buffers
+	Current Language: en_us
+	Locale: en_GB
+	System encoding: Cp1252
+	File encoding: UTF-8
+	CPU: 12x AMD Ryzen 5 5600X 6-Core Processor 
