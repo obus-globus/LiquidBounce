@@ -1,0 +1,27 @@
+// Capture loom's runClient JavaExec recipe (mainClass, classpath, jvmArgs, systemProperties, args, workingDir),
+// dump it to a file, and ABORT before the JVM actually launches. Replay later as a controlled stock launch.
+gradle.projectsEvaluated {
+  rootProject.tasks.matching { it.name == "runClient" }.configureEach { t ->
+    if (t instanceof JavaExec) {
+      def je = t as JavaExec
+      // do the capture as a doFirst, then throw to prevent the game from starting
+      je.doFirst {
+        def out = new File("C:/Dev/ProjectsSorted/LiquidBounceSpecial/LiquidBounce/converter-win/fabric-probe/runclient-recipe.txt")
+        def sb = new StringBuilder()
+        sb.append("MAIN=").append(je.mainClass.getOrElse("<none>")).append("\n")
+        sb.append("WORKDIR=").append(je.workingDir?.absolutePath).append("\n")
+        sb.append("---JVMARGS---\n")
+        je.allJvmArgs.each { sb.append(it).append("\n") }
+        sb.append("---SYSPROPS---\n")
+        je.systemProperties.each { k,v -> sb.append(k).append("=").append(v).append("\n") }
+        sb.append("---ARGS---\n")
+        je.args.each { sb.append(it).append("\n") }
+        sb.append("---CLASSPATH---\n")
+        je.classpath.each { sb.append(it.absolutePath).append("\n") }
+        out.text = sb.toString()
+        println "[CAPTURE] wrote recipe to " + out.absolutePath
+        throw new StopExecutionException("captured; not launching")
+      }
+    }
+  }
+}
