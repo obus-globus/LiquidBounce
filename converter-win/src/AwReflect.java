@@ -60,7 +60,7 @@ public final class AwReflect {
     public static Object invokeResolved(Method method,Object target,Object[] args,String label){ try{return method.invoke(target,args);}
         catch(InvocationTargetException e){Throwable cause=e.getCause()==null?e:e.getCause();log(label,cause);throw sneaky(cause);}
         catch(Throwable e){log(label,e);throw sneaky(e);} }
-    private static void log(String label,Throwable t){if(label==null||t.getClass().getName().equals("net.minecraft.server.RunningOnDifferentThreadException"))return;System.out.println("[FULL] REFLECT-INVOKE-FAIL "+label+" -> "+t);t.printStackTrace(System.out);}
+    private static void log(String label,Throwable t){if(label==null||t.getClass().getName().equals("net.minecraft.server.RunningOnDifferentThreadException"))return;InjectionLogger.error("REFLECT-INVOKE-FAIL "+label,t);}
     @SuppressWarnings("unchecked") private static <T extends Throwable> RuntimeException sneaky(Throwable t)throws T{throw (T)t;}
     private static RuntimeException re(Throwable e){ return e instanceof RuntimeException r ? r : new RuntimeException(e); }
 }

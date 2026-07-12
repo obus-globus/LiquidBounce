@@ -1,6 +1,7 @@
 import org.objectweb.asm.*;
 import org.objectweb.asm.tree.*;
 import java.util.*;
+import lbrt.InjectionLogger;
 
 /**
  * Rewrites loadable static Mixin {@code @Accessor}/{@code @Invoker} stubs into schema-neutral
@@ -42,7 +43,7 @@ public final class AccessorBridgeRewriter {
             c.accept(w);
             return w.toByteArray();
         } catch (Throwable t) {
-            System.out.println("[FULL] accessor bridge rewrite failed for " + internalName + " -> " + t);
+            InjectionLogger.error("accessor bridge rewrite failed for " + internalName, t);
             return bytes;
         }
     }

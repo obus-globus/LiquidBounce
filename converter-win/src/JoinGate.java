@@ -22,7 +22,7 @@ public final class JoinGate {
     public static synchronized boolean deferStatic(String owner, String name, String desc, Object[] args) {
         if (!blocked) return false;
         pending = new Call(owner, name, desc, args.clone());
-        System.out.println("[FULL] server join deferred until registry restoration completes");
+        InjectionLogger.info("server join deferred until registry restoration completes");
         return true;
     }
 
@@ -41,7 +41,7 @@ public final class JoinGate {
             Method method = owner.getDeclaredMethod(call.name, params);
             method.setAccessible(true);
             method.invoke(null, call.args);
-            System.out.println("[FULL] resumed deferred server join");
+            InjectionLogger.info("resumed deferred server join");
         } catch (InvocationTargetException e) {
             throw re(e.getCause() == null ? e : e.getCause());
         } catch (Throwable t) {

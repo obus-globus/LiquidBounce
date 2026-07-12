@@ -18,7 +18,8 @@ New-Item -ItemType Directory -Force $Out | Out-Null
     (Join-Path $Src 'FullInjectAgent.java') (Join-Path $Src 'RetransformConverter.java') `
     (Join-Path $Src 'LateAttachVerifier.java') (Join-Path $Src 'AccessorBridgeRewriter.java') `
     (Join-Path $Src 'JoinGateRewriter.java') (Join-Path $Src 'AwReflect.java') `
-    (Join-Path $Src 'DuckDispatch.java') (Join-Path $Src 'JoinGate.java')
+    (Join-Path $Src 'DuckDispatch.java') (Join-Path $Src 'JoinGate.java') `
+    (Join-Path $Src 'InjectionLogger.java')
 if ($LASTEXITCODE -ne 0) { throw 'javac (converter) failed' }
 
 # --- 1b. focused schema/dispatch/accessor fixtures ---------------------------------------------------------
@@ -59,7 +60,7 @@ Pop-Location
 $jarEntries = @(& "$Jdk\jar.exe" tf $FullJar)
 foreach ($required in @('FullInjectAgent.class','LateAttachVerifier.class','AccessorBridgeRewriter.class',
         'JoinGateRewriter.class','lbrt/DuckDispatch.class','lbrt/DuckDispatch$Impl.class',
-        'lbrt/JoinGate.class','lbrt/JoinGate$Call.class')) {
+        'lbrt/JoinGate.class','lbrt/JoinGate$Call.class','lbrt/InjectionLogger.class')) {
     if ($required -notin $jarEntries) { throw "full-agent.jar missing required entry: $required" }
 }
 & "$Jdk\java.exe" -cp "$TestOut;$FullJar" ConverterAutoTests compat
