@@ -16,6 +16,8 @@ public class FullInjectAgent {
     static final Map<String,List<String[]>> ifaceMap = new ConcurrentHashMap<>();  // iface -> all [target, sidecar]; read by concurrent CFT threads
     static final Set<String> targetSet = new HashSet<>();                          // internal names of mixin targets
     static Instrumentation INST;
+    static volatile java.lang.instrument.ClassFileTransformer CFT;                 // installed on-load transformer; kept so uninject can remove it
+    static boolean everInjected;                                                  // true once injected; a second inject in the same JVM (even after uninject) is refused — LB can't be re-staged live
     static final Set<String> preLoaded = ConcurrentHashMap.newKeySet();            // MC classes loaded at attach (can't be AW-widened)
     static final Map<String,Boolean> npField = new ConcurrentHashMap<>();          // owner#name -> non-public?
     static final Map<String,Boolean> npMethod = new ConcurrentHashMap<>();         // owner#name desc -> non-public?
@@ -33,6 +35,9 @@ public class FullInjectAgent {
 
     public static void agentmain(String a, Instrumentation inst) throws Exception {
         InjectionLogger.configure(a);
+        if (a != null && a.contains("mode=uninject")) { INST = inst; uninject(inst); return; }
+        if (everInjected) { InjectionLogger.error("re-injection refused: LiquidBounce was already injected into this JVM. Re-injecting after an uninject is not supported (its runtime cannot be re-staged onto the already-populated loader). Restart the client to inject again.");
+            throw new IllegalStateException("re-injection after uninject is not supported in the same JVM; restart the client"); }
         INST = inst;
         PLATFORM = detectPlatform(inst);
         SYS = PLATFORM.targetLoader();
@@ -120,7 +125,7 @@ public class FullInjectAgent {
         // CFT: mixin target loads/retransforms -> lazily define sidecar+state (class PD), return target' (AW-widened if
         // future-loaded). Future non-target MC class -> apply AW on-load. LB class -> caller-rewrite to sidecars + reflect
         // its direct accesses to already-loaded MC members.
-        inst.addTransformer(new ClassFileTransformer(){ public byte[] transform(ClassLoader l,String n,Class<?> c,ProtectionDomain p,byte[] b){
+        CFT = new ClassFileTransformer(){ public byte[] transform(ClassLoader l,String n,Class<?> c,ProtectionDomain p,byte[] b){
             if (n==null) return null;
             try {
                 boolean connect = n.equals(JoinGateRewriter.CONNECT_SCREEN);
@@ -149,7 +154,9 @@ public class FullInjectAgent {
                 }
                 if (n.startsWith("net/minecraft/")||n.startsWith("com/mojang/")) return PLATFORM.cftAppliesAw()? awApply(n,b) : null;  // widen future MC classes (on-load) + AW-class retransforms (modded loaders widen future classes themselves)
             } catch(Throwable x){ LateAttachVerifier.error("TRANSFORM_FAILURE",n,"cft",rootMsg(x)); InjectionLogger.error("CFT fail "+n, x); }
-            return null; } }, true);
+            return null; } };
+        inst.addTransformer(CFT, true);
+        everInjected = true;   // committed: LB staged + targets converted + transformer live -> refuse any re-inject
         refreshLoadedAccessState(inst,aw);
 
         // Force the join entry point through the installed CFT now. A later first-click load is too late to prove that
@@ -205,6 +212,82 @@ public class FullInjectAgent {
             mcCls.getMethod("execute", Runnable.class).invoke(mc, kick);
             InjectionLogger.info("scheduled LB bootstrap on MC main thread");
         } catch (Throwable e) { LateAttachVerifier.error("BOOTSTRAP_SCHEDULE_FAILURE","LiquidBounce","bootstrap",rootMsg(e)); lbrt.JoinGate.cancelAndOpen(); InjectionLogger.error("bootstrap kick failed", e); }
+    }
+
+    /** Reverse a prior late-attach in the SAME JVM (re-attach the agent with agentArgs "mode=uninject"). Two steps, both
+     *  on the MC main thread in one turn so no frame renders mid-teardown:
+     *   1) LiquidBounce's OWN shutdown via ClientShutdownEvent -> EventManager.unregisterAll (all hooks go inert),
+     *      ChunkScanner stop, ConfigSystem.storeAll, BrowserBackendManager.stop -> MCEF.shutdown (native CEF torn down).
+     *   2) removeTransformer + retransform every loaded mixin target + the connect-screen hook back to ORIGINAL bytes
+     *      (retransform is revertible by design), so the injected hooks physically disappear.
+     *  Benign, unavoidable residue: the defined sidecar/state classes stay loaded but go dead (unreferenced once targets
+     *  revert), and classes AccessWidened on load keep their widened access (retransform cannot narrow modifiers). */
+    static void uninject(Instrumentation inst) throws Exception {
+        if (CFT == null || PLATFORM == null || SYS == null) { InjectionLogger.info("uninject: no active LiquidBounce injection in this JVM; nothing to do"); return; }
+        InjectionLogger.info("=== UNINJECT: LiquidBounce shutdown + bytecode revert ===");
+        Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft", false, SYS);
+        Object mc = mcCls.getMethod("getInstance").invoke(null);
+        CompletableFuture<Throwable> done = new CompletableFuture<>();
+        Runnable task = () -> { Throwable err = null; try {
+            // 1) LB's own teardown (unregister listeners, stop threads, save config, stop the CEF browser).
+            try {
+                Class<?> em = Class.forName("net.ccbluex.liquidbounce.event.EventManager", true, SYS);
+                Object emInst = em.getField("INSTANCE").get(null);
+                Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientShutdownEvent", true, SYS).getField("INSTANCE").get(null);
+                em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event", true, SYS)).invoke(emInst, ev);
+                InjectionLogger.info("uninject: ClientShutdownEvent dispatched (listeners unregistered, CEF browser stopped)");
+            } catch (Throwable t) { InjectionLogger.warn("uninject: LB shutdown threw, continuing to revert -> " + rootMsg(t)); }
+            // 2) Drop our transformer, then revert. Split by when the class loaded:
+            //    - preLoaded targets: their target' kept ORIGINAL schema + modifiers, so revert straight to original.
+            //    - targets loaded AFTER attach (e.g. ConnectScreen, whose connect/updateStatus are AccessWidened to
+            //      public): they were widened on load, and retransform cannot narrow modifiers, so re-derive from
+            //      original and re-apply ONLY the AccessWidener (drops the injected hooks, keeps the widened access).
+            inst.removeTransformer(CFT);
+            List<Class<?>> pureSet = new ArrayList<>(), awSet = new ArrayList<>();
+            for (Class<?> c : inst.getAllLoadedClasses()) { String in = c.getName().replace('.','/');
+                if (!inst.isModifiableClass(c)) continue;
+                if (!(convMap.containsKey(in) || in.equals(JoinGateRewriter.CONNECT_SCREEN))) continue;
+                (preLoaded.contains(in) ? pureSet : awSet).add(c); }
+            int total = pureSet.size() + awSet.size();
+            int reverted = revertBatch(inst, pureSet);
+            if (!awSet.isEmpty()) {
+                java.lang.instrument.ClassFileTransformer awOnly = new java.lang.instrument.ClassFileTransformer(){
+                    public byte[] transform(ClassLoader l,String n,Class<?> c,ProtectionDomain p,byte[] b){
+                        try { return PLATFORM.applyAw(n, b); } catch (Throwable t) { return null; } } };
+                inst.addTransformer(awOnly, true);
+                try { reverted += revertBatch(inst, awSet); } finally { inst.removeTransformer(awOnly); }
+            }
+            InjectionLogger.info("uninject: reverted " + reverted + "/" + total + " classes (injected hooks removed; AccessWidened access retained where widened on load)");
+            try { lbrt.JoinGate.cancelAndOpen(); } catch (Throwable ignored) {}   // ensure the join gate is not left blocked
+            // 3) If LiquidBounce owned the current Screen (ClickGUI / HUD editor / an error dialog), return to in-game so
+            //    the user is not stranded on a now-dead LB screen after its classes go inert.
+            try {
+                Object screen = mcCls.getField("screen").get(mc);
+                if (screen != null && screen.getClass().getName().startsWith("net.ccbluex.")) {
+                    Class<?> screenCls = Class.forName("net.minecraft.client.gui.screens.Screen", false, SYS);
+                    mcCls.getMethod("setScreen", screenCls).invoke(mc, new Object[]{null});
+                    InjectionLogger.info("uninject: cleared LiquidBounce screen -> returned to in-game");
+                }
+            } catch (Throwable t) { InjectionLogger.warn("uninject: could not clear LB screen -> " + rootMsg(t)); }
+        } catch (Throwable t) { err = t; } finally { done.complete(err); } };
+        mcCls.getMethod("execute", Runnable.class).invoke(mc, task);
+        Throwable err;
+        try { err = done.get(60, TimeUnit.SECONDS); }
+        catch (TimeoutException t) { throw new IllegalStateException("uninject timed out waiting for the MC main thread"); }
+        if (err != null) throw new IllegalStateException("uninject failed on the MC main thread: " + rootMsg(err), err);
+        CFT = null;
+        InjectionLogger.info("=== UNINJECT complete; LiquidBounce removed from the running client ===");
+    }
+
+    /** Retransform a revert set in ONE VM op; on the all-or-nothing batch failing, isolate per-class so one stubborn
+     *  class doesn't block the rest. Returns how many reverted. */
+    static int revertBatch(Instrumentation inst, List<Class<?>> cs) {
+        if (cs.isEmpty()) return 0;
+        try { inst.retransformClasses(cs.toArray(new Class<?>[0])); return cs.size(); }
+        catch (Throwable batch) { int ok = 0;
+            for (Class<?> c : cs) { try { inst.retransformClasses(c); ok++; }
+                catch (Throwable e) { InjectionLogger.warn("uninject: revert fail " + c.getName() + " -> " + rootMsg(e)); } }
+            return ok; }
     }
 
     static long tRebase, tVerify; static int nRebase;   // per-class CFT cost instrumentation (retransform window)
