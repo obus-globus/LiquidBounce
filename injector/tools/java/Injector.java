@@ -2,8 +2,9 @@
 // Attaches to a running JVM by PID and loads an agent jar into it via agentmain (VirtualMachine.loadAgent).
 // Loads the injector agent jar into a running client JVM.
 //
-// It relies ONLY on the JDK's jdk.attach module (com.sun.tools.attach.VirtualMachine). No tools.jar, no extra deps.
-// A SEPARATE injector process is the correct model: jdk.attach.allowAttachSelf is NOT needed (never self-attach).
+// Attaches via the JDK attach API (jdk.attach module) when present, otherwise the bundled jattach native binary
+// (see Attacher/Jattach) — so a plain JRE with no jdk.attach can inject too. A SEPARATE injector process is the
+// correct model: jdk.attach.allowAttachSelf is NOT needed (never self-attach).
 //
 // ---------------------------------------------------------------------------------------------------------------
 // COMPILE — any JDK 9+; the project uses JDK 25. Built by the injectorToolJar Gradle task (sources under
@@ -21,8 +22,6 @@
 //   - agentArgs is a single string handed to agentmain(String, Instrumentation). "" (empty) is fine for full-agent.
 // ---------------------------------------------------------------------------------------------------------------
 
-import com.sun.tools.attach.VirtualMachine;
-import com.sun.tools.attach.VirtualMachineDescriptor;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,13 +47,10 @@ public class Injector {
 
         File absoluteJar = jar.getAbsoluteFile();
         Consumer<String> output = log != null ? log : ignored -> {};
-        VirtualMachine vm = null;
-        try {
-            output.accept("Attaching to PID " + pid + " ...");
-            vm = VirtualMachine.attach(pid.trim());
-            output.accept("Attached successfully.");
-            if (targetLogFound != null) try {
-                File targetLog = findMinecraftLog(vm.getSystemProperties());
+        output.accept("Attaching to PID " + pid + " (" + Attacher.mechanism() + ") ...");
+        if (targetLogFound != null) {
+            try {
+                File targetLog = findMinecraftLog(Attacher.systemProperties(pid));
                 if (targetLog != null) {
                     output.accept("Minecraft log: " + targetLog);
                     targetLogFound.accept(targetLog);
@@ -64,19 +60,8 @@ public class Injector {
             } catch (Exception logDiscoveryFailure) {
                 output.accept("Minecraft log discovery failed; continuing injection: " + logDiscoveryFailure.getMessage());
             }
-            output.accept("Loading agent: " + absoluteJar);
-            vm.loadAgent(absoluteJar.getPath(), agentArgs == null ? "" : agentArgs);
-            output.accept("Agent loaded successfully.");
-        } finally {
-            if (vm != null) {
-                try {
-                    vm.detach();
-                    output.accept("Detached from PID " + pid + ".");
-                } catch (Throwable detachFailure) {
-                    output.accept("Warning: detach failed: " + detachFailure.getMessage());
-                }
-            }
         }
+        Attacher.loadAgent(pid, absoluteJar, agentArgs, output);
     }
 
     private static File findMinecraftLog(Properties properties) {
@@ -122,9 +107,9 @@ public class Injector {
     public static void main(String[] args) {
         if (args.length < 2) {
             System.err.println("usage: java -cp out Injector <pid> <agent.jar> [agentArgs]");
-            System.err.println("running JVMs visible to this attach API:");
-            for (VirtualMachineDescriptor d : VirtualMachine.list())
-                System.err.println("  pid=" + d.id() + "  " + d.displayName());
+            System.err.println("attach mechanism: " + Attacher.mechanism());
+            for (var e : Attacher.attachableJvms().entrySet())
+                System.err.println("  pid=" + e.getKey() + "  " + e.getValue());
             System.exit(2);
         }
         String pid = args[0].trim();
@@ -149,8 +134,6 @@ public class Injector {
             // agentmain returned non-zero / threw — inspect the Minecraft log, the attach itself succeeded.
             System.exit(1);
         }
-        // Print the currently-visible JVMs for convenience (helps confirm the PID was the real one).
-        List<VirtualMachineDescriptor> list = VirtualMachine.list();
-        System.out.println("[INJ] done. JVMs now visible: " + list.size());
+        System.out.println("[INJ] done (" + Attacher.mechanism() + ").");
     }
 }

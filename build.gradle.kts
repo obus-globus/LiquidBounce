@@ -438,6 +438,7 @@ sourceSets {
     }
     create("injectorTool") {           // standalone attach launcher (NOT part of the agent jar)
         java.srcDir("injector/tools/java")
+        resources.srcDir("injector/tools/resources")   // bundled jattach binaries (JRE-only attach fallback)
     }
 }
 val injectorMixinExtras: Configuration by configurations.creating { isTransitive = false }

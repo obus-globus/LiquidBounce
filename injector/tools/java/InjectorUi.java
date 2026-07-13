@@ -1,6 +1,3 @@
-import com.sun.tools.attach.VirtualMachine;
-import com.sun.tools.attach.VirtualMachineDescriptor;
-
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.ListSelectionEvent;
@@ -347,10 +344,11 @@ public final class InjectorUi extends JFrame {
      *  injection target. No agent is loaded, so this has no side effect on the client. */
     private static String compatibilityReport(long pid) {
         StringBuilder r = new StringBuilder();
-        VirtualMachine vm = null;
         try {
-            vm = VirtualMachine.attach(Long.toString(pid));
-            java.util.Properties p = vm.getSystemProperties();
+            java.util.Properties p = Attacher.systemProperties(Long.toString(pid));
+            if (p.isEmpty())
+                return "Could not read the target's system properties (attach via " + Attacher.mechanism()
+                        + " returned nothing). The process may have exited or be un-attachable.";
             String javaVer = p.getProperty("java.specification.version", p.getProperty("java.version", "?"));
             String cmd = p.getProperty("sun.java.command", "");
             String cp = p.getProperty("java.class.path", "").toLowerCase();
@@ -373,10 +371,8 @@ public final class InjectorUi extends JFrame {
                     ? (mcOk ? "=> COMPATIBLE." : "=> Likely compatible — confirm the Minecraft version is 26.2.")
                     : "=> NOT a compatible target — see the issues above.");
         } catch (Throwable t) {
-            r.append("Could not attach to PID ").append(pid).append(": ").append(rootMessage(t))
+            r.append("Could not read from PID ").append(pid).append(": ").append(rootMessage(t))
                     .append("\n(The process may have exited, or may be a JVM you cannot attach to.)");
-        } finally {
-            if (vm != null) try { vm.detach(); } catch (Exception ignored) {}
         }
         return r.toString();
     }
@@ -523,12 +519,7 @@ public final class InjectorUi extends JFrame {
 
     private static DiscoveryResult findMinecraftProcesses() {
         Map<Long, String> titles = windowTitles();
-        Map<Long, String> attachable = new HashMap<>();
-        for (VirtualMachineDescriptor descriptor : VirtualMachine.list()) {
-            try {
-                attachable.put(Long.parseLong(descriptor.id()), descriptor.displayName());
-            } catch (NumberFormatException ignored) { }
-        }
+        Map<Long, String> attachable = Attacher.attachableJvms();   // empty on the jattach/JRE path; ProcessHandle still finds JVMs
 
         List<MinecraftProcess> matches = new ArrayList<>();
         Map<Long, MinecraftProcess> javaProcesses = new HashMap<>();
