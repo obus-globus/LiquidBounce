@@ -27,7 +27,7 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 tasks.jar {
-    // Fat jar: fold JNA (+ its bundled natives) in so `java -jar liquidbounce-injector-tool.jar` runs with no classpath.
+    // Self-contained jar: fold JNA (+ its bundled natives) in so `java -jar liquidbounce-injector-tool.jar` runs alone.
     archiveFileName = "liquidbounce-injector-tool.jar"
     // Enable-Native-Access grants JNA native access without a warning on Java 22+ (ignored/harmless on older).
     manifest { attributes("Main-Class" to "InjectorUi", "Enable-Native-Access" to "ALL-UNNAMED") }
