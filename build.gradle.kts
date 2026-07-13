@@ -445,12 +445,17 @@ dependencies { injectorMixinExtras("io.github.llamalad7:mixinextras-common:0.5.4
 
 // LB payload jar: loader-neutral LB classes/resources + the vanilla Platform impl (its Platform service wins).
 tasks.register<Jar>("lbClassesForInjector") {
-    dependsOn("classes", "processResources", "injectorLbVanillaClasses")
+    dependsOn("classes", "processResources", "injectorLbVanillaClasses", ":neoforge:classes", ":neoforge:processResources")
     archiveFileName.set("liquidbounce.jar")
     destinationDirectory.set(layout.buildDirectory.dir("injector/tmp"))
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from(sourceSets["injectorLbVanilla"].output)   // vanilla Platform impl + its net.ccbluex...platform.Platform service
     from(sourceSets.main.get().output)             // LB compiled classes + resources (mixin json, AW, assets)
+    // NeoForge companion mixins + config, so a NeoForge target gets injection points that match FML-patched MC.
+    // ONLY the mixins/neoforge classes + the config — NOT the neoforge platform.Platform service (would clash with
+    // the bundled vanilla Platform impl -> "Multiple/not-a-subtype" ServiceConfigurationError on the injected loader).
+    from("neoforge/build/classes/java/main") { include("net/ccbluex/liquidbounce/injection/mixins/neoforge/**") }
+    from("neoforge/build/resources/main") { include("liquidbounce-neoforge.mixins.json") }
 }
 
 tasks.register<Jar>("injectorAgentJar") {

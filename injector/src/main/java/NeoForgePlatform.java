@@ -115,7 +115,9 @@ final class NeoForgePlatform implements LoaderPlatform {
         Object svc = MixinService.getService();                                 // FMLMixinService (App loader)
         InjectionLogger.info("FML mixin service = "+svc.getClass().getName());
         Method addContent = findMethod(svc.getClass(), "addMixinConfigContent", String.class, byte[].class);
-        for (String cfg : new String[]{"liquidbounce.mixins.json","liquidbounce-fabric.mixins.json"}) {
+        // NeoForge runs FML-PATCHED MC classes, so the Fabric companions' injection points don't match and would fail
+        // (skipping their whole target, including the shared render hooks). Register the NeoForge companion set instead.
+        for (String cfg : new String[]{"liquidbounce.mixins.json","liquidbounce-neoforge.mixins.json"}) {
             byte[] cb = bundleResource(cfg);
             if (cb != null && addContent != null) addContent.invoke(svc, cfg, cb);
             Mixins.addConfiguration(cfg);
