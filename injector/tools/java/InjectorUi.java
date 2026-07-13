@@ -40,7 +40,6 @@ public final class InjectorUi extends JFrame {
     private final JButton refreshButton = new JButton("Refresh");
     private final JButton injectButton = new JButton("Inject LiquidBounce");
     private final JButton uninjectButton = new JButton("Uninject");
-    private final JButton checkButton = new JButton("Check compatibility");
     private final JProgressBar progressBar = new JProgressBar(0, 100);
     private SwingWorker<Void, String> logTailWorker;
     private volatile boolean tailingInjectionLog;
@@ -127,15 +126,12 @@ public final class InjectorUi extends JFrame {
         JPanel actions = new JPanel(new BorderLayout(10, 8));
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         refreshButton.addActionListener(event -> refreshProcesses());
-        checkButton.addActionListener(event -> checkCompatibility());
-        checkButton.setToolTipText("Attach read-only to the selected process and report whether it's a compatible injection target (Java 25+, loader, Minecraft version). Does not inject or load anything.");
         uninjectButton.addActionListener(event -> uninject());
         uninjectButton.setToolTipText("<html>Removes LiquidBounce from the selected client &mdash; shuts it down (browser, listeners) and reverts the game bytecode back to vanilla.<br><br>"
                 + "<b>Note:</b> you cannot inject again into the same client afterwards &mdash; restart it first.<br>"
                 + "Uninject also does <b>not</b> remove LiquidBounce from the process memory (its classes stay loaded until the client exits).</html>");
         injectButton.addActionListener(event -> inject());
         buttons.add(refreshButton);
-        buttons.add(checkButton);
         buttons.add(uninjectButton);
         buttons.add(injectButton);
         progressBar.setStringPainted(true);
@@ -155,11 +151,9 @@ public final class InjectorUi extends JFrame {
     }
 
     private void updateInjectEnabled() {
-        boolean sel = processTable.getSelectedRow() >= 0;
-        boolean ready = sel && new File(agentField.getText().trim()).isFile();
+        boolean ready = processTable.getSelectedRow() >= 0 && new File(agentField.getText().trim()).isFile();
         injectButton.setEnabled(ready);
         uninjectButton.setEnabled(ready);
-        checkButton.setEnabled(sel);
     }
 
     private void browseForAgent() {
@@ -321,79 +315,6 @@ public final class InjectorUi extends JFrame {
         }.execute();
     }
 
-    private void checkCompatibility() {
-        int selected = processTable.getSelectedRow();
-        if (selected < 0) return;
-        MinecraftProcess process = processModel.row(selected);
-        setBusy(true, "Checking compatibility ...", 20);
-        appendLog("Checking compatibility of PID " + process.pid + " (read-only) ...");
-        new SwingWorker<String, Void>() {
-            @Override protected String doInBackground() { return compatibilityReport(process.pid); }
-            @Override protected void done() {
-                try { for (String line : get().split("\n")) appendLog(line); }
-                catch (Exception e) { appendLog("Compatibility check failed: " + rootMessage(e)); }
-                finally {
-                    progressBar.setValue(100); progressBar.setString("Compatibility check done");
-                    setBusy(false, progressBar.getString(), 100);
-                }
-            }
-        }.execute();
-    }
-
-    /** Attach read-only to the target, read its system properties, detach — reports whether it's a compatible
-     *  injection target. No agent is loaded, so this has no side effect on the client. */
-    private static String compatibilityReport(long pid) {
-        StringBuilder r = new StringBuilder();
-        try {
-            java.util.Properties p = Attacher.systemProperties(Long.toString(pid));
-            if (p.isEmpty())
-                return "Could not read the target's system properties (attach via " + Attacher.mechanism()
-                        + " returned nothing). The process may have exited or be un-attachable.";
-            String javaVer = p.getProperty("java.specification.version", p.getProperty("java.version", "?"));
-            String cmd = p.getProperty("sun.java.command", "");
-            String cp = p.getProperty("java.class.path", "").toLowerCase();
-            int major = parseJavaMajor(javaVer);
-            boolean javaOk = major >= 25;
-            r.append(javaOk ? "  [OK]   " : "  [FAIL] ").append("Java runtime: ").append(javaVer)
-                    .append(javaOk ? "" : "  — LiquidBounce nextgen requires Java 25+").append('\n');
-            String lower = cmd.toLowerCase();
-            String loader = (lower.contains("knot") || cp.contains("fabric-loader")) ? "Fabric"
-                    : (lower.contains("fml") || lower.contains("neoforge") || cp.contains("neoforge")) ? "NeoForge"
-                    : lower.contains("net.minecraft.client.main.main") ? "Vanilla" : "unknown";
-            boolean loaderOk = !loader.equals("unknown");
-            r.append(loaderOk ? "  [OK]   " : "  [??]   ").append("Loader: ").append(loader)
-                    .append(loaderOk ? "" : "  — could not identify the mod loader (is this Minecraft?)").append('\n');
-            String mc = extractMcVersion(cmd, cp);
-            boolean mcOk = "26.2".equals(mc);
-            r.append(mcOk ? "  [OK]   " : "  [??]   ").append("Minecraft version: ").append(mc == null ? "unknown" : mc)
-                    .append(mcOk ? "" : "  — this agent targets 26.2; verify the client's version").append('\n');
-            r.append('\n').append(javaOk && loaderOk
-                    ? (mcOk ? "=> COMPATIBLE." : "=> Likely compatible — confirm the Minecraft version is 26.2.")
-                    : "=> NOT a compatible target — see the issues above.");
-        } catch (Throwable t) {
-            r.append("Could not read from PID ").append(pid).append(": ").append(rootMessage(t))
-                    .append("\n(The process may have exited, or may be a JVM you cannot attach to.)");
-        }
-        return r.toString();
-    }
-
-    private static int parseJavaMajor(String version) {
-        try {
-            String v = version.trim();
-            if (v.startsWith("1.")) v = v.substring(2);              // 1.8 -> 8
-            Matcher m = Pattern.compile("^(\\d+)").matcher(v);
-            return m.find() ? Integer.parseInt(m.group(1)) : -1;
-        } catch (Exception e) { return -1; }
-    }
-
-    private static String extractMcVersion(String cmd, String cpLower) {
-        Matcher m = Pattern.compile("--version\\s+(\\S+)").matcher(cmd);
-        if (m.find()) return m.group(1);
-        m = Pattern.compile("minecraft[-_/]?(\\d+\\.\\d+(?:\\.\\d+)?)").matcher(cpLower);
-        if (m.find()) return m.group(1);
-        return null;
-    }
-
     private void startInjectionLogTail(File logFile, boolean uninject) {
         if (logTailWorker != null && !logTailWorker.isDone()) logTailWorker.cancel(true);
         tailingInjectionLog = true;
@@ -504,7 +425,7 @@ public final class InjectorUi extends JFrame {
         agentField.setEnabled(!busy);
         progressBar.setValue(progress);
         progressBar.setString(text);
-        if (busy) { injectButton.setEnabled(false); uninjectButton.setEnabled(false); checkButton.setEnabled(false); } else updateInjectEnabled();
+        if (busy) { injectButton.setEnabled(false); uninjectButton.setEnabled(false); } else updateInjectEnabled();
     }
 
     private void appendLog(String message) {
@@ -689,11 +610,6 @@ public final class InjectorUi extends JFrame {
     }
 
     public static void main(String[] args) {
-        if (args.length > 1 && args[0].equals("--check")) {
-            try { System.out.println(compatibilityReport(Long.parseLong(args[1].trim()))); }
-            catch (NumberFormatException e) { System.err.println("usage: InjectorUi --check <pid>"); System.exit(2); }
-            return;
-        }
         if (args.length > 0 && args[0].equals("--list")) {
             DiscoveryResult discovery = findMinecraftProcesses();
             System.out.println("fallback=" + discovery.fallback);
