@@ -436,10 +436,6 @@ sourceSets {
         resources.srcDir("injector/src/lbpayload/resources")
         compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
     }
-    create("injectorTool") {           // standalone attach launcher (NOT part of the agent jar)
-        java.srcDir("injector/tools/java")
-        resources.srcDir("injector/tools/resources")   // bundled jattach binaries (JRE-only attach fallback)
-    }
 }
 val injectorMixinExtras: Configuration by configurations.creating { isTransitive = false }
 dependencies { injectorMixinExtras("io.github.llamalad7:mixinextras-common:0.5.4") }
@@ -534,12 +530,5 @@ tasks.register<Jar>("injectorAgentJar") {
 }
 
 // Standalone attach launcher (Swing VM-picker + attach + live log tail). Run this to attach the agent to a live PID.
-tasks.register<Jar>("injectorToolJar") {
-    group = "liquidbounce"
-    description = "Standalone launcher that attaches the injector agent to a running client JVM."
-    dependsOn("injectorToolClasses")
-    archiveFileName.set("liquidbounce-injector-tool.jar")
-    destinationDirectory.set(layout.buildDirectory.dir("injector"))
-    manifest { attributes("Main-Class" to "InjectorUi") }
-    from(sourceSets["injectorTool"].output)
-}
+// The injector window / attach launcher is now its own standalone Gradle project — see ../injector-tool/
+// (built with `cd injector-tool && ./gradlew jar`). It has no dependency on LiquidBounce.

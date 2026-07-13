@@ -52,8 +52,10 @@ injector/
   src/main/java/          converter engine + LoaderPlatform SPI + platforms  (default pkg + lbrt.*)
   src/mixinservice/       vspike.* standalone Sponge-Mixin service (vanilla mixin engine) + its SPI meta
   src/lbpayload/          LB Platform SPI vanilla impl (net.ccbluex.liquidbounce.platform.vanilla) — bundled into LB
-  tools/java/             Injector / InjectorUi — the standalone attach launcher
   lb-mixin-targets.txt    the mixin-target list the agent reads as a jar resource
+
+../injector-tool/         the attach launcher (Injector / InjectorUi window) is its OWN standalone Gradle project —
+                          no dependency on LiquidBounce; build with `cd injector-tool && ./gradlew jar`
 ```
 
 ## Build
@@ -61,8 +63,8 @@ injector/
 ```bash
 # the attach agent (add -PbundleMcefNative for an offline/headless MCEF bundle)
 ./gradlew injectorAgentJar            # -> build/injector/liquidbounce-injector-agent.jar
-# the standalone attach launcher
-./gradlew injectorToolJar             # -> build/injector/liquidbounce-injector-tool.jar
+# the standalone attach launcher (its own project — no LiquidBounce dependency)
+(cd ../injector-tool && ./gradlew jar)   # -> injector-tool/build/libs/liquidbounce-injector-tool.jar
 ```
 
 The agent jar carries: the Mixin framework + `vspike` service at the root (system loader), the converter classes
@@ -74,10 +76,10 @@ on-load `-javaagent`.
 
 ```bash
 # GUI: pick the target JVM, attach, tail the injection log
-java -jar build/injector/liquidbounce-injector-tool.jar
+java -jar injector-tool/build/libs/liquidbounce-injector-tool.jar
 
 # headless: attach directly to a PID
-java -cp build/injector/liquidbounce-injector-tool.jar Injector <pid> \
+java -cp injector-tool/build/libs/liquidbounce-injector-tool.jar Injector <pid> \
      build/injector/liquidbounce-injector-agent.jar ""
 ```
 
