@@ -24,8 +24,16 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.sun.jna.NativeLong;
+import com.sun.jna.Pointer;
+import com.sun.jna.platform.unix.X11;
+import com.sun.jna.platform.win32.User32;
+import com.sun.jna.platform.win32.WinDef.HWND;
+import com.sun.jna.ptr.IntByReference;
+import com.sun.jna.ptr.NativeLongByReference;
+import com.sun.jna.ptr.PointerByReference;
 
-/** Small Windows-friendly front end for Injector. No dependencies beyond the JDK. */
+/** Small Windows-friendly front end for Injector. */
 public final class InjectorUi extends JFrame {
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final Pattern TASKLIST_CSV = Pattern.compile("^\"([^\"]+)\",\"([0-9]+)\"");
@@ -498,88 +506,104 @@ public final class InjectorUi extends JFrame {
         }
     }
 
-    /** Best-effort OS window title per PID, so the picker can show e.g. "Minecraft 26.2" to tell apart multiple
-     *  instances. Windows: the Window Title column of {@code tasklist /v}. Linux/other: {@code xdotool} (works without
-     *  a window manager) then {@code wmctrl}. Any failure just yields no title (the column stays blank). */
+    /** Best-effort OS window title per PID via JNA, so the picker can show e.g. "Minecraft 26.2" to tell apart multiple
+     *  instances. Windows: User32 EnumWindows. Linux: X11 (walk the window tree, read _NET_WM_PID + _NET_WM_NAME) — no
+     *  window manager or external tools needed. macOS: not supported. Any failure yields no title (column stays blank). */
     private static Map<Long, String> windowTitles() {
         Map<Long, String> titles = new HashMap<>();
-        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
-        if (windows) {
-            for (String image : new String[]{"java.exe", "javaw.exe"}) {
-                try {
-                    Process p = new ProcessBuilder("tasklist.exe", "/v", "/FI", "IMAGENAME eq " + image, "/FO", "CSV", "/NH")
-                            .redirectErrorStream(true).start();
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            List<String> cols = parseCsvRow(line.trim());
-                            if (cols.size() < 2) continue;
-                            try {
-                                long pid = Long.parseLong(cols.get(1).trim());
-                                String title = cols.get(cols.size() - 1).trim();   // Window Title is the last column of /v
-                                if (!title.isBlank() && !title.equals("N/A")) titles.put(pid, title);
-                            } catch (NumberFormatException ignored) { }
-                        }
-                    }
-                    p.waitFor();
-                } catch (Exception ignored) { }
-            }
-        } else {
-            // Linux/other: prefer xdotool — it queries X directly via _NET_WM_PID, so it works even without a window
-            // manager (GLFW sets that on the Minecraft window). Fall back to wmctrl, which needs a running WM.
-            for (String id : runLines("xdotool", "search", "--name", ".+")) {
-                if (id.isBlank()) continue;
-                List<String> pidOut = runLines("xdotool", "getwindowpid", id.trim());
-                List<String> nameOut = runLines("xdotool", "getwindowname", id.trim());
-                if (pidOut.isEmpty() || nameOut.isEmpty()) continue;
-                try {
-                    long pid = Long.parseLong(pidOut.get(0).trim());
-                    String name = nameOut.get(0).trim();
-                    if (pid > 0 && !name.isBlank()) titles.putIfAbsent(pid, name);
-                } catch (NumberFormatException ignored) { }
-            }
-            if (titles.isEmpty()) {   // wmctrl -lp -> "0xWINID  desktop  PID  host  title..."
-                for (String line : runLines("wmctrl", "-lp")) {
-                    String[] parts = line.trim().split("\\s+", 5);
-                    if (parts.length < 5) continue;
-                    try {
-                        long pid = Long.parseLong(parts[2]);
-                        if (pid > 0 && !parts[4].isBlank()) titles.putIfAbsent(pid, parts[4].trim());
-                    } catch (NumberFormatException ignored) { }
-                }
-            }
-        }
+        try {
+            String os = System.getProperty("os.name", "").toLowerCase();
+            if (os.contains("win")) windowTitlesWindows(titles);
+            else if (!os.contains("mac") && !os.contains("darwin")) windowTitlesX11(titles);
+        } catch (Throwable ignored) { }   // JNA/native unavailable -> blank column, never fatal
         return titles;
     }
 
-    /** Run a command and return its stdout+stderr lines; empty on any failure (missing binary, non-zero exit, etc.). */
-    private static List<String> runLines(String... command) {
-        List<String> out = new ArrayList<>();
-        try {
-            Process p = new ProcessBuilder(command).redirectErrorStream(true).start();
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-                String line; while ((line = r.readLine()) != null) out.add(line);
+    /** Windows: EnumWindows over visible top-level windows -> pid + title. */
+    private static void windowTitlesWindows(Map<Long, String> titles) {
+        User32 u = User32.INSTANCE;
+        u.EnumWindows((HWND hWnd, Pointer data) -> {
+            if (!u.IsWindowVisible(hWnd)) return true;
+            IntByReference pidRef = new IntByReference();
+            u.GetWindowThreadProcessId(hWnd, pidRef);
+            long pid = pidRef.getValue() & 0xFFFFFFFFL;
+            char[] buf = new char[512];
+            int len = u.GetWindowText(hWnd, buf, buf.length);
+            if (len > 0 && pid > 0) {
+                String title = new String(buf, 0, len).trim();
+                if (!title.isEmpty()) titles.putIfAbsent(pid, title);
             }
-            p.waitFor();
-        } catch (Exception ignored) { }
-        return out;
+            return true;   // keep enumerating
+        }, null);
     }
 
-    /** Parse one RFC-4180-ish CSV row (double-quoted fields, "" escapes), as emitted by {@code tasklist /FO CSV}. */
-    private static List<String> parseCsvRow(String line) {
-        List<String> out = new ArrayList<>();
-        StringBuilder cur = new StringBuilder();
-        boolean inQuotes = false;
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (c == '"') {
-                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') { cur.append('"'); i++; }
-                else inQuotes = !inQuotes;
-            } else if (c == ',' && !inQuotes) { out.add(cur.toString()); cur.setLength(0); }
-            else cur.append(c);
+    /** Linux: recurse the X11 window tree from the root; each window's _NET_WM_PID + _NET_WM_NAME (fallback WM_NAME). */
+    private static void windowTitlesX11(Map<Long, String> titles) {
+        X11 x = X11.INSTANCE;
+        X11.Display display = x.XOpenDisplay(null);
+        if (display == null) return;
+        try {
+            X11.Atom pidAtom = x.XInternAtom(display, "_NET_WM_PID", false);
+            X11.Atom netName = x.XInternAtom(display, "_NET_WM_NAME", false);
+            X11.Atom utf8 = x.XInternAtom(display, "UTF8_STRING", false);
+            walkX11(x, display, x.XDefaultRootWindow(display), pidAtom, netName, utf8, titles);
+        } finally {
+            x.XCloseDisplay(display);
         }
-        out.add(cur.toString());
-        return out;
+    }
+
+    private static void walkX11(X11 x, X11.Display d, X11.Window w, X11.Atom pidAtom, X11.Atom netName, X11.Atom utf8,
+                                Map<Long, String> titles) {
+        long pid = readX11Cardinal(x, d, w, pidAtom);
+        if (pid > 0) {
+            String title = readX11Text(x, d, w, netName, utf8);
+            if (title == null) title = readX11Text(x, d, w, X11.XA_WM_NAME, X11.XA_STRING);
+            if (title != null && !title.isBlank()) titles.putIfAbsent(pid, title.trim());
+        }
+        X11.WindowByReference root = new X11.WindowByReference(), parent = new X11.WindowByReference();
+        PointerByReference children = new PointerByReference();
+        IntByReference n = new IntByReference();
+        if (x.XQueryTree(d, w, root, parent, children, n) != 0) {
+            Pointer p = children.getValue();
+            if (p != null) {
+                if (n.getValue() > 0)
+                    for (long id : p.getLongArray(0, n.getValue())) walkX11(x, d, new X11.Window(id), pidAtom, netName, utf8, titles);
+                x.XFree(p);
+            }
+        }
+    }
+
+    private static long readX11Cardinal(X11 x, X11.Display d, X11.Window w, X11.Atom prop) {
+        X11.AtomByReference type = new X11.AtomByReference();
+        IntByReference fmt = new IntByReference();
+        NativeLongByReference nitems = new NativeLongByReference(), after = new NativeLongByReference();
+        PointerByReference propRef = new PointerByReference();
+        if (x.XGetWindowProperty(d, w, prop, new NativeLong(0), new NativeLong(1), false, X11.XA_CARDINAL,
+                type, fmt, nitems, after, propRef) != 0) return -1;
+        Pointer p = propRef.getValue();
+        long v = -1;
+        if (p != null) {
+            if (nitems.getValue().longValue() >= 1 && fmt.getValue() == 32) v = p.getNativeLong(0).longValue();
+            x.XFree(p);
+        }
+        return v;
+    }
+
+    private static String readX11Text(X11 x, X11.Display d, X11.Window w, X11.Atom prop, X11.Atom reqType) {
+        X11.AtomByReference type = new X11.AtomByReference();
+        IntByReference fmt = new IntByReference();
+        NativeLongByReference nitems = new NativeLongByReference(), after = new NativeLongByReference();
+        PointerByReference propRef = new PointerByReference();
+        if (x.XGetWindowProperty(d, w, prop, new NativeLong(0), new NativeLong(1024), false, reqType,
+                type, fmt, nitems, after, propRef) != 0) return null;
+        Pointer p = propRef.getValue();
+        String s = null;
+        if (p != null) {
+            int len = nitems.getValue().intValue();
+            if (len > 0) s = new String(p.getByteArray(0, len), StandardCharsets.UTF_8);
+            x.XFree(p);
+        }
+        return s;
     }
 
     private static String shortCommand(String commandLine) {
