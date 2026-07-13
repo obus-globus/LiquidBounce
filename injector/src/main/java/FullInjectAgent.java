@@ -126,9 +126,11 @@ public class FullInjectAgent {
                 boolean connect = n.equals(JoinGateRewriter.CONNECT_SCREEN);
                 Conv cv = convMap.get(n);
                 if (cv!=null) {
-                    byte[] t = c==null ? cv.target : RetransformConverter.rebase(cv.target, b);
+                    byte[] t;
+                    if (c==null) t = cv.target;
+                    else { long s=System.nanoTime(); t = RetransformConverter.rebase(cv.target, b); tRebase += System.nanoTime()-s; nRebase++; }
                     if(connect)t=JoinGateRewriter.rewrite(n,t);
-                    if (c!=null && !LateAttachVerifier.verifyRetransform(n, b, t)) return null;
+                    if (c!=null) { long s=System.nanoTime(); boolean ok=LateAttachVerifier.verifyRetransform(n, b, t); tVerify += System.nanoTime()-s; if(!ok) return null; }
                     if(!cv.define(p))return null;
                     if (c==null) { byte[] w=awApply(n,t); if(w!=null) t=w; }
                     return t; }
@@ -205,26 +207,41 @@ public class FullInjectAgent {
         } catch (Throwable e) { LateAttachVerifier.error("BOOTSTRAP_SCHEDULE_FAILURE","LiquidBounce","bootstrap",rootMsg(e)); lbrt.JoinGate.cancelAndOpen(); InjectionLogger.error("bootstrap kick failed", e); }
     }
 
+    static long tRebase, tVerify; static int nRebase;   // per-class CFT cost instrumentation (retransform window)
+
     /** Publish all already-loaded target/caller rewrites from the Minecraft thread after bootstrap readiness. */
     static void activateLoadedTargets(Instrumentation inst) throws Exception {
-        int rt=0;
+        long t0=System.nanoTime();
+        List<Class<?>> targets=new ArrayList<>();
         for (Class<?> c : inst.getAllLoadedClasses()) { String in=c.getName().replace('.','/');
-            if (convMap.containsKey(in)&&preLoaded.contains(in)&&!in.equals(JoinGateRewriter.CONNECT_SCREEN)) { try {
-                if(!inst.isModifiableClass(c))throw new UnmodifiableClassException(in);
-                inst.retransformClasses(c); rt++;
-            } catch(Throwable e){ String det=e.getMessage();Throwable cc=e;while(cc.getCause()!=null){cc=cc.getCause();if(cc.getMessage()!=null)det=cc.getMessage();}String msg=e.getClass().getSimpleName()+": "+(det==null?"":det.replace('\n',' ').substring(0,Math.min(det.length(),600)));LateAttachVerifier.error("TARGET_RETRANSFORM_FAILURE",in,"target",msg);InjectionLogger.warn("retransform fail "+in+" -> "+msg); }
-            }
-        }
-        InjectionLogger.info("retransformed "+rt+" already-loaded targets on MC main thread");
-        for (Class<?> c : inst.getAllLoadedClasses()) if (preBootstrapLb.contains(c.getName())&&inst.isModifiableClass(c)) {
-            try { inst.retransformClasses(c); }
-            catch(Throwable e){ LateAttachVerifier.error("CALLER_RETRANSFORM_FAILURE",c.getName(),"caller",rootMsg(e)); }
-        }
+            if (convMap.containsKey(in)&&preLoaded.contains(in)&&!in.equals(JoinGateRewriter.CONNECT_SCREEN)&&inst.isModifiableClass(c)) targets.add(c); }
+        int rt=batchRetransform(inst, targets, "target");
+        long dt=(System.nanoTime()-t0)/1_000_000;
+        InjectionLogger.info("retransformed "+rt+"/"+targets.size()+" already-loaded targets on MC main thread ("
+            +dt+"ms total; rebase "+(tRebase/1_000_000)+"ms/"+nRebase+" classes, verify "+(tVerify/1_000_000)+"ms)");
+        List<Class<?>> callers=new ArrayList<>();
+        for (Class<?> c : inst.getAllLoadedClasses()) if (preBootstrapLb.contains(c.getName())&&inst.isModifiableClass(c)) callers.add(c);
+        batchRetransform(inst, callers, "caller");
         LateAttachVerifier.writeReport();
-        // Activation is intentionally best-effort per class: some targets legitimately cannot be retransformed live
-        // (e.g. ChatComponent's field-adding mixin), so a single batch retransform would fail all-or-nothing. Only a
-        // FATAL error aborts here; tolerable per-target/caller residue must not force the join gate closed.
+        // Only a FATAL error aborts here; tolerable per-target/caller residue must not force the join gate closed.
         if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("Late-attach verification failed during target activation; see report");
+    }
+
+    /** Retransform the whole set in ONE VM op (one safepoint, not N). retransformClasses is all-or-nothing, so if a
+     *  class legitimately cannot be retransformed live it fails the batch -> we then fall back to per-class ONLY for
+     *  that set to isolate the offender while still applying the rest. Common case (all succeed) is a single fast call. */
+    static int batchRetransform(Instrumentation inst, List<Class<?>> cs, String kind) {
+        if (cs.isEmpty()) return 0;
+        try { inst.retransformClasses(cs.toArray(new Class<?>[0])); return cs.size(); }
+        catch (Throwable batch) {
+            InjectionLogger.warn("batch "+kind+" retransform failed ("+rootMsg(batch)+"); isolating per-class");
+            int ok=0;
+            for (Class<?> c : cs) { String in=c.getName().replace('.','/');
+                try { inst.retransformClasses(c); ok++; }
+                catch (Throwable e) { LateAttachVerifier.error(kind.toUpperCase()+"_RETRANSFORM_FAILURE",in,kind,rootMsg(e));
+                    InjectionLogger.warn("retransform fail "+in+" -> "+rootMsg(e)); } }
+            return ok;
+        }
     }
     /** define into the app loader with the given PD (matches signer of signed target packages); true on success or
      *  benign already-defined, false on a real ClassFormat/Verify defect. */
