@@ -110,6 +110,12 @@ final class FabricPlatform implements LoaderPlatform {
         }
         if (f == null) throw new NoSuchFieldException("validParentCodeSources on " + delegate.getClass().getName());
         f.setAccessible(true);
+        // We publish the new set via a single reference write and rely on Knot's field being volatile for the
+        // happens-before to its concurrent isValidParentUrl readers. Verify that assumption instead of trusting it: if
+        // a future Knot makes the field non-volatile, surface it loudly rather than risk a torn/stale read landmine.
+        if (!java.lang.reflect.Modifier.isVolatile(f.getModifiers()))
+            InjectionLogger.warn("Knot.validParentCodeSources is NOT volatile on " + f.getDeclaringClass().getName()
+                + "; single-identity parent delegation depends on safe publication of this field on this Fabric version");
         Set<Path> cur = (Set<Path>) f.get(delegate);
         // Rebuild the whole set and publish once via the volatile field (safe concurrent read; never mutated after).
         Set<Path> next = new HashSet<>();

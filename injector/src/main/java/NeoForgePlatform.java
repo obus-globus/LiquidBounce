@@ -141,7 +141,8 @@ final class NeoForgePlatform implements LoaderPlatform {
         env = MixinEnvironment.getCurrentEnvironment();
         Field fProc = declaredUp(transformer.getClass(), "processor"); fProc.setAccessible(true); processor = fProc.get(transformer);
         fTransformedCount = declaredUp(processor.getClass(), "transformedCount"); fTransformedCount.setAccessible(true);
-        try { fErrorState = declaredUp(processor.getClass(), "errorState"); fErrorState.setAccessible(true); } catch(Throwable t){}
+        try { fErrorState = declaredUp(processor.getClass(), "errorState"); fErrorState.setAccessible(true); }
+        catch(Throwable t){ fErrorState = null; InjectionLogger.warn("Mixin processor 'errorState' field not found ("+t.getClass().getSimpleName()+"); a Fabric-incompatible mixin skip on NeoForge will fail loud instead of recovering"); }
         InjectionLogger.info("acquired live FML transformer "+transformer.getClass().getName()+" (transformedCount="+fTransformedCount.getInt(processor)+")");
     }
 
@@ -169,9 +170,14 @@ final class NeoForgePlatform implements LoaderPlatform {
         catch (Throwable t) {
             // A Fabric-distribution mixin whose target method diverges on NeoForge-patched MC throws a critical
             // InjectionError ("Scanned 0 target(s)"). Treat the whole target as UNCONVERTED (skip) rather than a hard
-            // failure that would abort the transactional gate, and clear the processor's error state for the next call.
-            if (fErrorState != null) try { fErrorState.setBoolean(processor, false); } catch(Throwable ig){}
+            // failure that would abort the transactional gate — BUT only if we can clear the processor's error state.
+            // If the reset is unavailable or fails, the processor stays poisoned and every later transform would fail
+            // spuriously, so fail loud here instead of silently corrupting the rest of the phase.
+            boolean cleared=false;
+            if (fErrorState != null) try { fErrorState.setBoolean(processor, false); cleared=true; } catch(Throwable ig){}
             Throwable c = t instanceof InvocationTargetException && t.getCause()!=null ? t.getCause() : t;
+            if (!cleared) throw new IllegalStateException("Mixin processor errorState could not be cleared after "+internal
+                +" failed ("+c.getClass().getSimpleName()+"); aborting to avoid poisoning subsequent transforms", c);
             InjectionLogger.warn("mixin skip "+internal+" -> "+c.getClass().getSimpleName()+": "+String.valueOf(c.getMessage()).split("\n")[0]);
             return null;
         }

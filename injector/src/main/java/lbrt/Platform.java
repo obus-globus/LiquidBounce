@@ -7,5 +7,4 @@ public final class Platform {
     private Platform() {}
     /** The loader against which the runtime helpers resolve MC/LB classes. Defaults to the system loader. */
     public static volatile ClassLoader LOADER = ClassLoader.getSystemClassLoader();
-    public static Class<?> load(String dotted) throws ClassNotFoundException { return Class.forName(dotted, false, LOADER); }
 }

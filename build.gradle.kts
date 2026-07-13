@@ -449,13 +449,29 @@ tasks.register<Jar>("lbClassesForInjector") {
     archiveFileName.set("liquidbounce.jar")
     destinationDirectory.set(layout.buildDirectory.dir("injector/tmp"))
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    from(sourceSets["injectorLbVanilla"].output)   // vanilla Platform impl + its net.ccbluex...platform.Platform service
-    from(sourceSets.main.get().output)             // LB compiled classes + resources (mixin json, AW, assets)
+    from(sourceSets["injectorLbVanilla"].output)   // vanilla-derived InjectorPlatform + its net.ccbluex...platform.Platform service
+    from(sourceSets.main.get().output) {           // LB compiled classes + resources (mixin json, AW, assets)
+        // The fabric-loader Platform impl is wired into the MAIN sourceSet (src/fabric), but it must NOT ride into the
+        // injector payload: Platform.current requires EXACTLY ONE impl and the injected client uses InjectorPlatform
+        // (from injectorLbVanilla above). Exclude it explicitly instead of relying on from()-ordering + EXCLUDE to
+        // collapse the duplicate service file — a reorder-fragile near-miss against Platform.current's singleOrNull().
+        exclude("net/ccbluex/liquidbounce/platform/fabric/**")
+        exclude("META-INF/services/net.ccbluex.liquidbounce.platform.Platform")
+    }
     // NeoForge companion mixins + config, so a NeoForge target gets injection points that match FML-patched MC.
     // ONLY the mixins/neoforge classes + the config — NOT the neoforge platform.Platform service (would clash with
     // the bundled vanilla Platform impl -> "Multiple/not-a-subtype" ServiceConfigurationError on the injected loader).
     from("neoforge/build/classes/java/main") { include("net/ccbluex/liquidbounce/injection/mixins/neoforge/**") }
     from("neoforge/build/resources/main") { include("liquidbounce-neoforge.mixins.json") }
+    // Fail LOUD if the :neoforge module was disabled by its MC/NeoForge version guard: its classes/processResources
+    // tasks then no-op and the two from() copies above silently grab nothing, shipping a NeoForge-LESS agent jar with
+    // no signal. Guard so that degradation is a visible build error, not a silent capability loss.
+    doFirst {
+        val nfMixins = file("neoforge/build/classes/java/main/net/ccbluex/liquidbounce/injection/mixins/neoforge")
+        val nfConfig = file("neoforge/build/resources/main/liquidbounce-neoforge.mixins.json")
+        if (!nfMixins.isDirectory || nfMixins.listFiles().orEmpty().none { it.name.endsWith(".class") } || !nfConfig.isFile)
+            throw GradleException("NeoForge companion mixins/config are missing from neoforge/build — the :neoforge module is likely disabled by its MC/NeoForge version guard, so the injector agent would ship WITHOUT NeoForge support. Re-enable :neoforge (matching NeoForge for this MC line) before building the injector, or knowingly build a Fabric/vanilla-only agent.")
+    }
 }
 
 tasks.register<Jar>("injectorAgentJar") {

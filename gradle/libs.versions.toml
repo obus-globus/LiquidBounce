@@ -50,8 +50,8 @@ viafabricplus = "4.6.1"
 immediatelyFast = "1.16.0+26.2-fabric"
 immediatelyFast-neoforge = "1.16.0+26.2-neoforge"
 iris = "1.11.1+26.2-fabric"
-# Iris has no NeoForge build for 26.2 yet; the NeoForge runtime skips it (see neoforge/build.gradle.kts).
-iris-neoforge = "1.10.9+26.1-neoforge"
+# Iris has no NeoForge build for 26.2 yet; the NeoForge runtime skips it (see neoforge/build.gradle.kts). Re-add an
+# `iris-neoforge` version + library alias here (matching the 26.2 NeoForge build) once one is published.
 
 # Kotlin
 # https://kotlinlang.org/releases.html
@@ -142,7 +142,6 @@ lenni0451-reflect = { group = "net.lenni0451", name = "Reflect", version.ref = "
 immediatelyFast = { group = "maven.modrinth", name = "ImmediatelyFast", version.ref = "immediatelyFast" }
 immediatelyFast-neoforge = { group = "maven.modrinth", name = "ImmediatelyFast", version.ref = "immediatelyFast-neoforge" }
 iris = { group = "maven.modrinth", name = "iris", version.ref = "iris" }
-iris-neoforge = { group = "maven.modrinth", name = "iris", version.ref = "iris-neoforge" }
 
 [plugins]
 fabric-loom = { id = "net.fabricmc.fabric-loom", version.ref = "fabric-loom" }

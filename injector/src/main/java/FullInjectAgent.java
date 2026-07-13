@@ -13,7 +13,7 @@ public class FullInjectAgent {
     static final Set<String> definedSynth = ConcurrentHashMap.newKeySet();
     static final Set<String> definingSynth = ConcurrentHashMap.newKeySet();
     static final Map<String,Conv> convMap = new ConcurrentHashMap<>();             // internal -> conversion holder
-    static final Map<String,List<String[]>> ifaceMap = new HashMap<>();            // iface -> all [target, sidecar]
+    static final Map<String,List<String[]>> ifaceMap = new ConcurrentHashMap<>();  // iface -> all [target, sidecar]; read by concurrent CFT threads
     static final Set<String> targetSet = new HashSet<>();                          // internal names of mixin targets
     static Instrumentation INST;
     static final Set<String> preLoaded = ConcurrentHashMap.newKeySet();            // MC classes loaded at attach (can't be AW-widened)
@@ -335,20 +335,24 @@ public class FullInjectAgent {
             LateAttachVerifier.error("BOOTSTRAP_WAIT_FAILURE","registries","bootstrap",rootMsg(t));
         } finally {
             CompletableFuture<Void> done=new CompletableFuture<>();
+            // Exactly one of {main-thread restore, timeout/failure fallback} performs the terminal gate action via the
+            // CAS below; the loser only ensures registries are restored (thaw.close is idempotent). This removes the
+            // race where both the waiter and a slow-but-live main thread drive the join gate.
+            java.util.concurrent.atomic.AtomicBoolean finalized=new java.util.concurrent.atomic.AtomicBoolean();
             Runnable restore=()->{try{
                 if(ready.get())try{activateLoadedTargets(INST);}
                 catch(Throwable t){ready.set(false);LateAttachVerifier.error("TARGET_ACTIVATION_FAILURE","targets","bootstrap",rootMsg(t));InjectionLogger.error("target activation failed -> "+rootMsg(t));}
-                restoreAndOpen(thaw,ready.get());
+                if(finalized.compareAndSet(false,true))restoreAndOpen(thaw,ready.get());else thaw.close();
             }finally{done.complete(null);}};
             try {
                 mcCls.getMethod("execute", Runnable.class).invoke(mc, restore);
                 // If the main-thread restore runnable (which releases the gate via restoreAndOpen) never completes,
                 // release the gate here too so a stalled/failed activation cannot leave multiplayer locked out.
                 try{done.get(60,TimeUnit.SECONDS);}
-                catch(TimeoutException t){LateAttachVerifier.warn("REGISTRY_RESTORE_MAIN_THREAD_TIMEOUT","registries","bootstrap","Main thread did not finish activation/restore within 60 seconds; applying state fallback");thaw.close();lbrt.JoinGate.cancelAndOpen();}
-                catch(InterruptedException t){Thread.currentThread().interrupt();thaw.close();lbrt.JoinGate.cancelAndOpen();}
-                catch(ExecutionException t){LateAttachVerifier.error("REGISTRY_RESTORE_TASK_FAILURE","registries","bootstrap",rootMsg(t));thaw.close();lbrt.JoinGate.cancelAndOpen();}
-            } catch(Throwable t){ thaw.close();lbrt.JoinGate.cancelAndOpen();LateAttachVerifier.error("REGISTRY_RESTORE_SCHEDULE_FAILURE","registries","bootstrap",rootMsg(t)); }
+                catch(TimeoutException t){LateAttachVerifier.warn("REGISTRY_RESTORE_MAIN_THREAD_TIMEOUT","registries","bootstrap","Main thread did not finish activation/restore within 60 seconds; applying state fallback");if(finalized.compareAndSet(false,true)){thaw.close();lbrt.JoinGate.cancelAndOpen();}else thaw.close();}
+                catch(InterruptedException t){Thread.currentThread().interrupt();if(finalized.compareAndSet(false,true)){thaw.close();lbrt.JoinGate.cancelAndOpen();}else thaw.close();}
+                catch(ExecutionException t){LateAttachVerifier.error("REGISTRY_RESTORE_TASK_FAILURE","registries","bootstrap",rootMsg(t));if(finalized.compareAndSet(false,true)){thaw.close();lbrt.JoinGate.cancelAndOpen();}else thaw.close();}
+            } catch(Throwable t){ if(finalized.compareAndSet(false,true)){thaw.close();lbrt.JoinGate.cancelAndOpen();}else thaw.close();LateAttachVerifier.error("REGISTRY_RESTORE_SCHEDULE_FAILURE","registries","bootstrap",rootMsg(t)); }
         } }, "lb-registry-restore");
         waiter.setDaemon(true);
         waiter.start();

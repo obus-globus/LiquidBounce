@@ -499,8 +499,8 @@ abstract class CheckLoaderPurityTask : DefaultTask() {
 abstract class MixinDivergenceCheckTask : DefaultTask() {
 
     /**
-     * Compiled class tree of the shared mixins. The whole compile output may be
-     * passed; the task filters to the `injection/mixins/minecraft/` package itself.
+     * Compiled class tree of the mixins. The whole compile output may be passed; the task filters to the
+     * `injection/mixins/minecraft/` (shared) and `injection/mixins/neoforge/` (companion) packages.
      */
     @get:InputFiles
     abstract val mixinClasses: ConfigurableFileCollection
@@ -537,15 +537,20 @@ abstract class MixinDivergenceCheckTask : DefaultTask() {
 
     @TaskAction
     fun run() {
+        // Validate BOTH the shared minecraft mixins AND the NeoForge companions against the patched jar: the
+        // companions are the loader-specific injectors most likely to drift on a NeoForge bump, so they need the same
+        // build-time check. The fabric companions target the UNPATCHED shape and are deliberately NOT checked here.
         val mixinFiles = mixinClasses.asFileTree.files.filter { file ->
             file.extension == "class" &&
-                file.path.replace(File.separatorChar, '/')
-                    .contains("net/ccbluex/liquidbounce/injection/mixins/minecraft/")
+                file.path.replace(File.separatorChar, '/').let { p ->
+                    p.contains("net/ccbluex/liquidbounce/injection/mixins/minecraft/") ||
+                        p.contains("net/ccbluex/liquidbounce/injection/mixins/neoforge/")
+                }
         }
 
         if (mixinFiles.isEmpty()) {
             throw GradleException(
-                "No compiled shared mixins found under injection/mixins/minecraft/ in " +
+                "No compiled mixins found under injection/mixins/{minecraft,neoforge}/ in " +
                     "${mixinClasses.files}. Did :compileJava run?"
             )
         }

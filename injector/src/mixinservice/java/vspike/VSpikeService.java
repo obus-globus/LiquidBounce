@@ -32,6 +32,7 @@ public class VSpikeService extends MixinServiceAbstract {
     /** After MixinBootstrap.init() has offered the factory, create the transformer. */
     public IMixinTransformer createTransformer(){
         IMixinTransformerFactory factory = getInternal(IMixinTransformerFactory.class);
+        if (factory == null) throw new IllegalStateException("Mixin transformer factory not yet offered — call createTransformer() after MixinBootstrap.init()");
         return factory.createTransformer();
     }
 }

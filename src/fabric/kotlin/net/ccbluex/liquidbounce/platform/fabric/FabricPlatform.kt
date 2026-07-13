@@ -113,6 +113,9 @@ class FabricPlatform : Platform {
         return true
     }
 
+    // buildCreativeTab is called once per registered tab; only warn about a missing FabricAPI once, not N times.
+    private var fabricApiMissingLogged = false
+
     override fun buildCreativeTab(
         title: Component,
         icon: Supplier<ItemStack>,
@@ -120,8 +123,11 @@ class FabricPlatform : Platform {
     ): CreativeModeTab? {
         // Check if FabricAPI is installed, otherwise we can't use the page buttons
         if (!fabricApiCreativeTabPresent) {
-            logger.error("FabricAPI is not installed, please install it to use the page buttons " +
-                "in the creative inventory")
+            if (!fabricApiMissingLogged) {
+                fabricApiMissingLogged = true
+                logger.error("FabricAPI is not installed, please install it to use the page buttons " +
+                    "in the creative inventory")
+            }
             return null
         }
 

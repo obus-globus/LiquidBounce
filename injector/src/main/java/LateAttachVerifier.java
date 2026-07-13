@@ -12,7 +12,11 @@ public final class LateAttachVerifier {
     public record Issue(String severity, String code, String owner, String artifact, String method, String message) {}
     private static final List<Issue> ISSUES = new CopyOnWriteArrayList<>();
     private static final Set<String> DEDUP = Collections.synchronizedSet(new HashSet<>());
-    private static final ThreadLocal<Integer> LOCAL_ERRORS = ThreadLocal.withInitial(() -> 0);
+    // Per-invocation error counter. Each verify* method reads it before/after its SYNCHRONOUS scan on the calling
+    // thread, so the delta counts exactly the errors that scan recorded — errors logged by other threads bump THEIR
+    // own counter, never this one, so a conversion cannot be falsely passed by an unrelated concurrent error. int[]
+    // holder rather than ThreadLocal<Integer>: no boxing, and the single reused array means no per-thread leak growth.
+    private static final ThreadLocal<int[]> LOCAL_ERRORS = ThreadLocal.withInitial(() -> new int[1]);
     private static volatile boolean REPORT_STARTED;
 
     private LateAttachVerifier() {}
@@ -60,7 +64,7 @@ public final class LateAttachVerifier {
     /** True only if a FATAL error was recorded (any ERROR whose code is not in {@link #SOFT_ERROR_CODES}). Bootstrap/
      *  activation/gate decisions use this so tolerable residue does not block init or lock the join gate closed. */
     public static boolean hasFatalErrors() { for(Issue i:ISSUES) if(i.severity.equals("ERROR")&&!SOFT_ERROR_CODES.contains(i.code)) return true; return false; }
-    private static int localErrors() { return LOCAL_ERRORS.get(); }
+    private static int localErrors() { return LOCAL_ERRORS.get()[0]; }
     public static List<Issue> issues() { return List.copyOf(ISSUES); }
 
     private static void verifySchema(String owner, String artifact, byte[] expectedBytes, byte[] actualBytes) {
@@ -178,7 +182,7 @@ public final class LateAttachVerifier {
     private static boolean hasAnn(MethodNode m,String d){if(m.visibleAnnotations!=null)for(AnnotationNode a:m.visibleAnnotations)if(a.desc.equals(d))return true;if(m.invisibleAnnotations!=null)for(AnnotationNode a:m.invisibleAnnotations)if(a.desc.equals(d))return true;return false;}
 
     private static void add(String severity,String code,String owner,String artifact,String method,String message){
-        if(severity.equals("ERROR"))LOCAL_ERRORS.set(LOCAL_ERRORS.get()+1);
+        if(severity.equals("ERROR"))LOCAL_ERRORS.get()[0]++;
         String k=severity+'|'+code+'|'+owner+'|'+artifact+'|'+method+'|'+message;
         boolean added=DEDUP.add(k);if(added)ISSUES.add(new Issue(severity,code,owner,artifact,method,message));
         if(added&&REPORT_STARTED)writeReport();

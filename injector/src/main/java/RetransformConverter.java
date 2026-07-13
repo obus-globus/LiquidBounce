@@ -2,6 +2,7 @@ import org.objectweb.asm.*;
 import org.objectweb.asm.tree.*;
 import org.objectweb.asm.tree.analysis.*;
 import java.util.*;
+import java.util.function.Predicate;
 
 /**
  * Schema-neutral converter core. Given an ALREADY-LOADED class's original bytes O and the Mixin-transformed
@@ -258,7 +259,7 @@ public class RetransformConverter {
         InsnList in = g.instructions;
         in.add(new FieldInsnNode(Opcodes.GETSTATIC, sidecar, "STATE", "Ljava/util/Map;"));
         in.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        // State s = (State) STATE.get(self); if(s==null){ s=new State(); STATE.put(self,s);} return s;
+        // State s = (State) STATE.get(self); if(s==null){ s=new State(); initState(self,s); STATE.put(self,s);} return s;
         in.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/util/Map", "get", "(Ljava/lang/Object;)Ljava/lang/Object;", true));
         in.add(new TypeInsnNode(Opcodes.CHECKCAST, stateName));
         in.add(new VarInsnNode(Opcodes.ASTORE, 1));
@@ -269,14 +270,16 @@ public class RetransformConverter {
         in.add(new InsnNode(Opcodes.DUP));
         in.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, stateName, "<init>", "()V", false));
         in.add(new VarInsnNode(Opcodes.ASTORE, 1));
+        // Initialize BEFORE publishing into the map. If initState throws, nothing is stored, so a later getState retries
+        // cleanly instead of forever returning a half-initialized State (get()!=null would skip re-init).
+        in.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        in.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "initState", "("+targetDesc+"L"+stateName+";)V", false));
         in.add(new FieldInsnNode(Opcodes.GETSTATIC, sidecar, "STATE", "Ljava/util/Map;"));
         in.add(new VarInsnNode(Opcodes.ALOAD, 0));
         in.add(new VarInsnNode(Opcodes.ALOAD, 1));
         in.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/util/Map", "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true));
         in.add(new InsnNode(Opcodes.POP));
-        in.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        in.add(new VarInsnNode(Opcodes.ALOAD, 1));
-        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "initState", "("+targetDesc+"L"+stateName+";)V", false));
         in.add(notNull);
         in.add(new VarInsnNode(Opcodes.ALOAD, 1));
         in.add(new InsnNode(Opcodes.ARETURN));
@@ -288,22 +291,29 @@ public class RetransformConverter {
      *  assignment is copied into initState(Target,State) and runs once when sidecar state is first materialized. */
     MethodNode buildInstanceStateInitializer(ClassNode transformed) {
         MethodNode out=new MethodNode(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,"initState","("+targetDesc+"L"+stateName+";)V",null,null);
-        Set<String> done=new HashSet<>();
+        Set<String> done=new HashSet<>(), sawInit=new HashSet<>();
         for(MethodNode ctor:transformed.methods){if(!ctor.name.equals("<init>")||ctor.instructions==null)continue;
             try{
                 Analyzer<BasicValue> analyzer=new Analyzer<>(new BasicInterpreter());Frame<BasicValue>[] frames=analyzer.analyze(transformed.name,ctor);AbstractInsnNode[] ins=ctor.instructions.toArray();
-                for(int i=0;i<ins.length;i++){if(!(ins[i] instanceof FieldInsnNode f)||f.getOpcode()!=Opcodes.PUTFIELD||!f.owner.equals(targetInternal)||!addedInstanceFields.contains(f.name)||!done.add(f.name+" "+f.desc))continue;
-                    Frame<BasicValue> at=frames[i];if(at==null||at.getStackSize()<2){done.remove(f.name+" "+f.desc);continue;}int base=at.getStackSize()-2,start=-1;
+                for(int i=0;i<ins.length;i++){if(!(ins[i] instanceof FieldInsnNode f)||f.getOpcode()!=Opcodes.PUTFIELD||!f.owner.equals(targetInternal)||!addedInstanceFields.contains(f.name))continue;
+                    String fk=f.name+" "+f.desc;sawInit.add(fk);if(!done.add(fk))continue;
+                    Frame<BasicValue> at=frames[i];if(at==null||at.getStackSize()<2){done.remove(fk);continue;}int base=at.getStackSize()-2,start=-1;
                     for(int s=i-1;s>=0;s--)if(ins[s].getOpcode()>=0&&frames[s]!=null&&frames[s].getStackSize()==base){start=s;break;}
-                    if(start<0||!(ins[start] instanceof VarInsnNode recv)||recv.getOpcode()!=Opcodes.ALOAD||recv.var!=0){done.remove(f.name+" "+f.desc);continue;}
+                    if(start<0||!(ins[start] instanceof VarInsnNode recv)||recv.getOpcode()!=Opcodes.ALOAD||recv.var!=0){done.remove(fk);continue;}
                     boolean safe=true;for(int s=start+1;s<i;s++){AbstractInsnNode p=ins[s];if(p instanceof JumpInsnNode||p instanceof TableSwitchInsnNode||p instanceof LookupSwitchInsnNode||p instanceof IincInsnNode||(p instanceof VarInsnNode v&&v.var!=0)){safe=false;break;}}
-                    if(!safe){done.remove(f.name+" "+f.desc);continue;}
+                    if(!safe){done.remove(fk);continue;}
                     out.instructions.add(new VarInsnNode(Opcodes.ALOAD,1));Map<LabelNode,LabelNode> labels=new HashMap<>();
                     for(int s=start+1;s<i;s++)if(ins[s].getOpcode()>=0)out.instructions.add(ins[s].clone(labels));
                     out.instructions.add(new FieldInsnNode(Opcodes.PUTFIELD,stateName,f.name,f.desc));
                 }
             }catch(Throwable ignored){}
         }
+        // Make the known "hard @Local residue" VISIBLE: a mixin-added instance field that HAD a constructor initializer
+        // we could not straight-line replay (branchy/multi-local init, or analysis failure) defaults to zero/null on
+        // objects constructed before attach. Record it in the verification report instead of dropping it silently.
+        for(String fk:sawInit)if(!done.contains(fk))
+            LateAttachVerifier.warn("FIELD_INIT_UNREPLAYED",targetInternal,"state",
+                "instance field "+fk+" has a constructor initializer that could not be replayed (defaults to zero/null on objects constructed before attach)");
         out.instructions.add(new InsnNode(Opcodes.RETURN));rewriteRefs(out,true);out.maxLocals=2;out.maxStack=8;return out;
     }
     void addFieldAccessors(ClassNode S, FieldNode f) {
@@ -372,17 +382,17 @@ public class RetransformConverter {
             m.exceptions == null ? null : m.exceptions.toArray(new String[0]));
         s.instructions = m.instructions; s.tryCatchBlocks = m.tryCatchBlocks;
         s.maxStack = m.maxStack; s.maxLocals = m.maxLocals;
-        relocatedHandlerName.put(m.name + " " + m.desc, "h$" + m.name + "|" + newDesc);
         rewriteRefs(s, true);   // rewrite added-member refs inside the moved body
         return s;
     }
-    final Map<String,String> relocatedHandlerName = new HashMap<>();
 
     /** GLOBAL table of mixin-ADDED methods across ALL targets, keyed by "owner name desc" -> [owner, sidecar,
      *  isStatic]. Keyed by OWNER (not just name+desc) because the same handler name+desc can be added to multiple
      *  targets; a call is resolved by walking the receiver's class hierarchy to the declaring target. */
-    public static Map<String,String[]> GADDED, GFIELD;
-    public static Map<String,List<String[]>> GIFACE;
+    // volatile: assigned once by the agent AFTER Phase A completes, then read from many concurrent CFT threads. The
+    // volatile write/read gives the happens-before that safely publishes each fully-populated table to those readers.
+    public static volatile Map<String,String[]> GADDED, GFIELD;
+    public static volatile Map<String,List<String[]>> GIFACE;
     String[] addedFieldTarget(String owner, String name, String desc) {
         if (GFIELD == null) return null;
         for (String c = owner; c != null && !c.equals("java/lang/Object"); c = superOf(c)) { String[] g = GFIELD.get(gkey(c, name, desc)); if (g != null) return g; }
@@ -414,6 +424,17 @@ public class RetransformConverter {
         return null;
     }
     String[] addedCallTarget(MethodInsnNode mi) { return addedCall(mi.owner, mi.name, mi.desc, mi.getOpcode() == Opcodes.INVOKESTATIC); }
+
+    /** SIDECAR-relocation path: can the sidecar legally name this type in a CHECKCAST? Inaccessible iff the type is
+     *  non-public AND in a different package than the sidecar (public or same-package are nameable). Unknown bytes ->
+     *  assume accessible (don't erase), matching the caller-path Resolver's conservative default. */
+    boolean typeInaccessibleFromSidecar(String internal) {
+        if (internal == null || internal.isEmpty() || internal.charAt(0) == '[') return false;
+        int acc = classAccess(internal);
+        if (acc < 0) return false;
+        if ((acc & Opcodes.ACC_PUBLIC) != 0) return false;
+        return !pkg(internal).equals(pkg(sidecar));
+    }
 
     /** Rewrite references to added members (field->accessor, method->sidecar static, invokedynamic Handle->
      *  sidecar static [A]) and, inside the sidecar, non-public target field access via reflection [B]. */
@@ -470,11 +491,11 @@ public class RetransformConverter {
                         m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "refGet$" + fi.name, "(" + targetDesc + ")" + fi.desc, false));
                     else
                         m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, sidecar, "refSet$" + fi.name, "(" + targetDesc + fi.desc + ")V", false));
-                } else if (inSidecar && nonPublicField(fi.owner,fi.name,fi.desc)) rewriteFieldAw(m,fi);
+                } else if (inSidecar && nonPublicField(fi.owner,fi.name,fi.desc)) rewriteFieldAw(m,fi,this::typeInaccessibleFromSidecar);
             } else if (inSidecar && p instanceof FieldInsnNode fi && nonPublicField(fi.owner,fi.name,fi.desc)) {
                 // Relocated handlers are no longer subclasses/nestmates of their target. Protected or package-private
                 // fields inherited from another package (for example Screen.minecraft) must therefore use reflection.
-                rewriteFieldAw(m,fi);
+                rewriteFieldAw(m,fi,this::typeInaccessibleFromSidecar);
             } else if (p instanceof MethodInsnNode mi && addedCallTarget(mi) != null) {
                 // call to a mixin-ADDED method (relocated to a sidecar). GADDED spans ALL targets, so a call to a base
                 // class's @Unique method from a subclass mixin's relocated body routes to the BASE class's sidecar.
@@ -499,9 +520,9 @@ public class RetransformConverter {
                 if (mi.getOpcode()==Opcodes.INVOKESPECIAL && mi.name.equals("<init>")) {
                     AbstractInsnNode nw=mi.getPrevious();
                     while(nw!=null&&!(nw instanceof TypeInsnNode tn&&tn.getOpcode()==Opcodes.NEW&&tn.desc.equals(mi.owner)))nw=nw.getPrevious();
-                    if(nw!=null&&nw.getNext()!=null&&nw.getNext().getOpcode()==Opcodes.DUP){AbstractInsnNode dup=nw.getNext();m.instructions.remove(nw);m.instructions.remove(dup);rewriteAwCtorInline(m,mi);}
+                    if(nw!=null&&nw.getNext()!=null&&nw.getNext().getOpcode()==Opcodes.DUP){AbstractInsnNode dup=nw.getNext();m.instructions.remove(nw);m.instructions.remove(dup);rewriteAwCtorInline(m,mi,this::typeInaccessibleFromSidecar);}
                 } else if (!mi.name.startsWith("<") && (mi.getOpcode()==Opcodes.INVOKEVIRTUAL||mi.getOpcode()==Opcodes.INVOKESTATIC||mi.getOpcode()==Opcodes.INVOKESPECIAL)) {
-                    rewriteAwMethodInline(m,mi);
+                    rewriteAwMethodInline(m,mi,this::typeInaccessibleFromSidecar);
                 }
             } else if (p instanceof InvokeDynamicInsnNode idn) {
                 // A: rewrite bootstrap Handle args that point at a relocated target method -> sidecar static.
@@ -591,7 +612,24 @@ public class RetransformConverter {
         clinit.instructions.insertBefore(ret, add); clinit.maxStack = Math.max(clinit.maxStack, 3);
     }
 
-    static String invokerId(String name, String desc) { return name + "__" + Integer.toHexString(desc.hashCode() & 0xffffff); }
+    static String invokerId(String name, String desc) { return mangle(name) + "__" + mangle(desc); }
+    /** Injective mapping of an internal name / method descriptor to a legal Java identifier body (encodes '/', ';',
+     *  '(', ')', '[', '&lt;', '&gt;', '.', '|' and escapes '_'), so two generated helpers can never alias onto the same
+     *  slot. Replaces the old 24-bit desc.hashCode() key, under which two same-named private overloads could collide
+     *  onto one rmi$/RM$ pair (and two interface (owner,name,desc) triples onto one trampoline). The "__" join is safe
+     *  because a mangled part never contains two adjacent underscores. */
+    static String mangle(String s) {
+        StringBuilder b = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) { char c = s.charAt(i);
+            switch (c) {
+                case '_': b.append("_u"); break; case '/': b.append("_s"); break; case ';': b.append("_e"); break;
+                case '[': b.append("_a"); break; case '(': b.append("_l"); break; case ')': b.append("_r"); break;
+                case '<': b.append("_i"); break; case '>': b.append("_g"); break; case '.': b.append("_p"); break;
+                case '|': b.append("_b"); break; default: b.append(c);
+            }
+        }
+        return b.toString();
+    }
 
     /** B (methods): a static invoker rmi$<id>(Target self, args...) that reflectively calls the private target method. */
     void addReflectiveInvoker(ClassNode S, String name, String desc, boolean isStatic) {
@@ -647,7 +685,7 @@ public class RetransformConverter {
     static void loadClassConst(InsnList in, Type t) { if (t.getSort() <= Type.DOUBLE) in.add(new FieldInsnNode(Opcodes.GETSTATIC, boxOwner(t), "TYPE", "Ljava/lang/Class;")); else in.add(new LdcInsnNode(t)); }
 
     static String ifaceTrampName(String iface, String name, String desc) {
-        return "ifd$" + name.replace('<','_').replace('>','_') + "__" + Integer.toHexString((iface + name + desc).hashCode() & 0xffffff);
+        return "ifd$" + mangle(name) + "__" + mangle(iface + "|" + desc);
     }
 
     static MethodNode buildIfaceDispatchTramp(String trampName, String iface, String name, String desc) {
@@ -725,7 +763,7 @@ public class RetransformConverter {
             in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ILOAD),slots[i]));box(in,at[i]);in.add(new InsnNode(Opcodes.AASTORE));}
         in.add(new MethodInsnNode(Opcodes.INVOKESTATIC,"lbrt/DuckDispatch","invoke",
             "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;",false));
-        adaptInlineResult(in,rt,false);
+        adaptInlineResult(in,rt,false,NEVER_INACC);
         m.instructions.insertBefore(mi,in);m.instructions.remove(mi);m.maxLocals=Math.max(m.maxLocals,next);
     }
 
@@ -737,15 +775,18 @@ public class RetransformConverter {
         boolean typeInaccessible(String internalName);
     }
     static final String AWR = "lbrt/AwReflect";
-    static Resolver RES;   // set for the duration of a rewriteLbAw call (single-threaded per CFT invocation is fine)
+    /** Type-inaccessibility predicate used when erasing CHECKCASTs to types the rewritten class cannot name. It is
+     *  threaded as a parameter through the AW-inline helpers (NOT a shared static) so the caller path (LB→MC, uses the
+     *  Resolver) and the sidecar path (relocated body, uses {@link #typeInaccessibleFromSidecar}) never clobber each
+     *  other and both are thread-safe. NEVER_INACC is the no-op used where no erasure applies. */
+    static final Predicate<String> NEVER_INACC = t -> false;
 
     /** Rewrite LB's own direct access to non-public members / inaccessible TYPES of already-loaded MC classes into
      *  reflective calls (fields/methods/ctors -> lbrt/AwReflect via string-named owner+param types, so no inaccessible
      *  type appears as a constant), and erase CHECKCASTs to inaccessible types. Classes loaded AFTER attach get the
      *  AccessWidener on-load, so their members stay direct (Resolver returns false for them). */
     public static synchronized byte[] rewriteLbAw(byte[] lbBytes, Resolver r) {
-        RES = r;
-        try {
+        Predicate<String> inacc = r::typeInaccessible;
             ClassNode c = read(lbBytes);
             boolean[] changed = {false};
             for (MethodNode m : c.methods) {
@@ -753,7 +794,7 @@ public class RetransformConverter {
                 for (AbstractInsnNode p = m.instructions.getFirst(), nx; p != null; p = nx) {
                     nx = p.getNext();
                     if (p instanceof FieldInsnNode fi && r.fieldNeedsReflect(fi.owner, fi.name, fi.desc)) {
-                        rewriteFieldAw(m, fi); changed[0] = true;
+                        rewriteFieldAw(m, fi, inacc); changed[0] = true;
                     } else if (p instanceof MethodInsnNode ci && ci.getOpcode() == Opcodes.INVOKESPECIAL && ci.name.equals("<init>")
                             && r.methodNeedsReflect(ci.owner, ci.name, ci.desc)) {
                         AbstractInsnNode nw = ci.getPrevious();
@@ -761,12 +802,12 @@ public class RetransformConverter {
                         if (nw != null && nw.getNext() != null && nw.getNext().getOpcode() == Opcodes.DUP) {
                             AbstractInsnNode dup = nw.getNext();
                             m.instructions.remove(nw); m.instructions.remove(dup);
-                            rewriteAwCtorInline(m,ci); changed[0] = true;
+                            rewriteAwCtorInline(m,ci,inacc); changed[0] = true;
                         }
                     } else if (p instanceof MethodInsnNode mi && mi.name.charAt(0) != '<'
                             && (mi.getOpcode() == Opcodes.INVOKEVIRTUAL || mi.getOpcode() == Opcodes.INVOKESTATIC || mi.getOpcode() == Opcodes.INVOKESPECIAL)
                             && r.methodNeedsReflect(mi.owner, mi.name, mi.desc)) {
-                        rewriteAwMethodInline(m,mi); changed[0] = true;
+                        rewriteAwMethodInline(m,mi,inacc); changed[0] = true;
                     } else if (p instanceof TypeInsnNode ti && ti.getOpcode() == Opcodes.CHECKCAST
                             && ti.desc.charAt(0) != '[' && r.typeInaccessible(ti.desc)) {
                         m.instructions.remove(p);   // erase CHECKCAST to an inaccessible type (value flows as Object)
@@ -775,12 +816,9 @@ public class RetransformConverter {
                 }
             }
             return changed[0] ? write(c, lbBytes) : lbBytes;
-        } finally {
-            RES = null;
-        }
     }
 
-    static void rewriteAwMethodInline(MethodNode m, MethodInsnNode mi) {
+    static void rewriteAwMethodInline(MethodNode m, MethodInsnNode mi, Predicate<String> inacc) {
         boolean isStatic=mi.getOpcode()==Opcodes.INVOKESTATIC;
         Type[] at=Type.getArgumentTypes(mi.desc);Type rt=Type.getReturnType(mi.desc);
         int next=m.maxLocals,receiver=isStatic?-1:next++;
@@ -794,33 +832,33 @@ public class RetransformConverter {
         pushObjectArgs(in,at,slots);
         in.add(new MethodInsnNode(Opcodes.INVOKESTATIC,AWR,"inv",
             "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;",false));
-        adaptInlineResult(in,rt,true);
+        adaptInlineResult(in,rt,true,inacc);
         m.instructions.insertBefore(mi,in);m.instructions.remove(mi);m.maxLocals=Math.max(m.maxLocals,next);
     }
 
-    static void rewriteAwCtorInline(MethodNode m, MethodInsnNode ci) {
+    static void rewriteAwCtorInline(MethodNode m, MethodInsnNode ci, Predicate<String> inacc) {
         Type[] at=Type.getArgumentTypes(ci.desc);int next=m.maxLocals;int[] slots=new int[at.length];
         for(int i=0;i<at.length;i++){slots[i]=next;next+=at[i].getSize();}
         InsnList in=new InsnList();for(int i=at.length-1;i>=0;i--)in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ISTORE),slots[i]));
         in.add(new LdcInsnNode(ci.owner));pushStrArray(in,at);in.add(new LdcInsnNode(ci.owner+"#<init>"+ci.desc));pushObjectArgs(in,at,slots);
         in.add(new MethodInsnNode(Opcodes.INVOKESTATIC,AWR,"newInst",
             "(Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;",false));
-        if(RES==null||!RES.typeInaccessible(ci.owner))in.add(new TypeInsnNode(Opcodes.CHECKCAST,ci.owner));
+        if(!inacc.test(ci.owner))in.add(new TypeInsnNode(Opcodes.CHECKCAST,ci.owner));
         m.instructions.insertBefore(ci,in);m.instructions.remove(ci);m.maxLocals=Math.max(m.maxLocals,next);
     }
 
     static void pushObjectArgs(InsnList in,Type[] at,int[] slots){in.add(intConst(at.length));in.add(new TypeInsnNode(Opcodes.ANEWARRAY,"java/lang/Object"));
         for(int i=0;i<at.length;i++){in.add(new InsnNode(Opcodes.DUP));in.add(intConst(i));in.add(new VarInsnNode(at[i].getOpcode(Opcodes.ILOAD),slots[i]));box(in,at[i]);in.add(new InsnNode(Opcodes.AASTORE));}}
 
-    static void adaptInlineResult(InsnList in,Type rt,boolean eraseInaccessible){
+    static void adaptInlineResult(InsnList in,Type rt,boolean eraseInaccessible,Predicate<String> inacc){
         if(rt.getSort()==Type.VOID){in.add(new InsnNode(Opcodes.POP));return;}
         if(rt.getSort()<=Type.DOUBLE){unbox(in,rt);return;}
         if(rt.getSort()==Type.ARRAY)in.add(new TypeInsnNode(Opcodes.CHECKCAST,rt.getDescriptor()));
-        else if(!eraseInaccessible||RES==null||!RES.typeInaccessible(rt.getInternalName()))in.add(new TypeInsnNode(Opcodes.CHECKCAST,rt.getInternalName()));
+        else if(!eraseInaccessible||!inacc.test(rt.getInternalName()))in.add(new TypeInsnNode(Opcodes.CHECKCAST,rt.getInternalName()));
     }
     /** internal name (object) or descriptor (array/primitive) as a STRING to hand AwReflect for Class.forName. */
     static String typeName(Type t) { return t.getSort() == Type.OBJECT ? t.getInternalName() : t.getDescriptor(); }
-    static void rewriteFieldAw(MethodNode m, FieldInsnNode fi) {
+    static void rewriteFieldAw(MethodNode m, FieldInsnNode fi, Predicate<String> inacc) {
         Type ft = Type.getType(fi.desc); String sfx = awSfx(ft);
         String valDesc = ft.getSort() <= Type.DOUBLE ? ft.getDescriptor() : "Ljava/lang/Object;";
         int op = fi.getOpcode();
@@ -833,7 +871,7 @@ public class RetransformConverter {
             m.instructions.set(fi, call);
             // CHECKCAST back to the field type, UNLESS that type is inaccessible (then leave as Object)
             if (ft.getSort() == Type.ARRAY) m.instructions.insert(call, new TypeInsnNode(Opcodes.CHECKCAST, ft.getDescriptor()));
-            else if (ft.getSort() == Type.OBJECT && !(RES != null && RES.typeInaccessible(ft.getInternalName()))) m.instructions.insert(call, new TypeInsnNode(Opcodes.CHECKCAST, ft.getInternalName()));
+            else if (ft.getSort() == Type.OBJECT && !inacc.test(ft.getInternalName())) m.instructions.insert(call, new TypeInsnNode(Opcodes.CHECKCAST, ft.getInternalName()));
         } else { // PUTFIELD / PUTSTATIC
             pre.add(new LdcInsnNode(fi.owner)); pre.add(new LdcInsnNode(fi.name));
             m.instructions.insertBefore(fi, pre);
@@ -883,11 +921,17 @@ public class RetransformConverter {
         n.accept(w); return w.toByteArray();
     }
     // --- correct getCommonSuperClass by reading class bytes (no classloading, no init) ---
-    static final Map<String,String[]> META = new HashMap<>();   // internal -> [superName, isInterface?"1":"0", iface...]
+    static final Map<String,String[]> META = new java.util.concurrent.ConcurrentHashMap<>();   // internal -> [superName, isInterface?"1":"0", iface...]
     static final java.util.concurrent.ConcurrentHashMap<String,Boolean> NON_PUBLIC_FIELDS = new java.util.concurrent.ConcurrentHashMap<>();
     static boolean nonPublicField(String owner,String name,String desc){String key=owner+'\0'+name+' '+desc;Boolean cached=NON_PUBLIC_FIELDS.get(key);if(cached!=null)return cached;
         boolean result=false;String c=owner;int guard=0;while(c!=null&&!c.equals("java/lang/Object")&&guard++<64){try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)break;ClassReader cr=new ClassReader(b);ClassNode n=new ClassNode();cr.accept(n,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);boolean found=false;for(FieldNode f:n.fields)if(f.name.equals(name)&&f.desc.equals(desc)){result=(f.access&Opcodes.ACC_PUBLIC)==0;found=true;break;}if(found)break;c=cr.getSuperName();}catch(Throwable t){break;}}
         Boolean raced=NON_PUBLIC_FIELDS.putIfAbsent(key,result);return raced==null?result:raced;}
+    static final java.util.concurrent.ConcurrentHashMap<String,Integer> CLASS_ACCESS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Class access flags read from CLASS_BYTES (no classloading/init); -1 when the bytes are unavailable. */
+    static int classAccess(String internal){
+        return CLASS_ACCESS.computeIfAbsent(internal,k->{try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(k);
+            return b==null?-1:new ClassReader(b).getAccess();}catch(Throwable t){return -1;}});
+    }
     record MethodAccess(String owner,int ownerAccess,int memberAccess){}
     static final java.util.concurrent.ConcurrentHashMap<String,Optional<MethodAccess>> METHOD_ACCESS = new java.util.concurrent.ConcurrentHashMap<>();
     static boolean illegalSidecarMethod(String caller,String owner,String name,String desc){
@@ -903,7 +947,8 @@ public class RetransformConverter {
         // method, so illegalSidecarMethod judged the call legal and emitted no reflection (fail-open) even though
         // the JVM would bind the restrictive class method -> IllegalAccessError at runtime. Match the JVM order.
         ArrayDeque<String> ifaces=new ArrayDeque<>();
-        for(String c=owner;c!=null;){try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)break;
+        int guard=0;
+        for(String c=owner;c!=null&&guard++<256;){try{byte[] b=CLASS_BYTES==null?null:CLASS_BYTES.apply(c);if(b==null)break;
             ClassNode n=new ClassNode();new ClassReader(b).accept(n,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);
             for(MethodNode m:n.methods)if(m.name.equals(name)&&m.desc.equals(desc))return Optional.of(new MethodAccess(c,n.access,m.access));
             ifaces.addAll(n.interfaces);c=n.superName;}catch(Throwable ignored){break;}}
@@ -923,7 +968,7 @@ public class RetransformConverter {
                 for (String i : cr.getInterfaces()) l.add(i);
                 m = l.toArray(new String[0]); }
         } catch (Throwable t) { m = new String[]{"java/lang/Object","0"}; }
-        META.put(cn, m); return m;
+        String[] prev = META.putIfAbsent(cn, m); return prev != null ? prev : m;
     }
     static boolean isIface(String cn) { return "1".equals(meta(cn)[1]); }
     static String superOf(String cn) { return meta(cn)[0]; }

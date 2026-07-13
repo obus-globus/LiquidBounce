@@ -32,7 +32,11 @@ final class McefNative {
             try (JarFile jf = new JarFile(selfJar)) {
                 if (jf.getEntry("mcef-native/libcef.so") == null) return; // native not bundled -> download-on-load
                 Path dir = Paths.get(System.getProperty("java.io.tmpdir"), "lb-mcef-native");
-                if (!Files.exists(dir.resolve("libcef.so"))) {
+                Path marker = dir.resolve(".extract-complete");
+                // Skip only if a PRIOR extraction fully COMPLETED (marker is written last). Presence of libcef.so alone
+                // is not enough: a partial/interrupted extraction (native present, helper binaries missing) would
+                // otherwise be treated as done and fail MCEF init confusingly. Absent marker -> (re-)extract, overwriting.
+                if (!Files.exists(marker)) {
                     Files.createDirectories(dir);
                     for (Enumeration<JarEntry> en = jf.entries(); en.hasMoreElements(); ) {
                         JarEntry e = en.nextElement();
@@ -47,10 +51,11 @@ final class McefNative {
                             Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
                         }
                     }
+                    Files.write(marker, new byte[0]);   // mark complete only after the whole tree extracted
                 }
                 for (String x : new String[]{"jcef_helper", "chrome-sandbox", "jcef_helper.exe"}) {
                     File f = dir.resolve(x).toFile();
-                    if (f.exists()) f.setExecutable(true, false);
+                    if (f.exists()) f.setExecutable(true, true);   // owner-only, not world-executable
                 }
                 setEnv("PROVIDED_JCEF_PATH", dir.toAbsolutePath().toString());
                 System.out.println(tag + " offline MCEF: bundled native staged, PROVIDED_JCEF_PATH=" + dir.toAbsolutePath());

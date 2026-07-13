@@ -26,7 +26,10 @@ public final class JoinGate {
         return true;
     }
 
-    /** Must normally be called on Minecraft's main thread. Replays the latest deferred click exactly once. */
+    /** Must normally be called on Minecraft's main thread. Replays the latest deferred click exactly once. The deferral
+     *  window is short (bootstrap only) and the user stays parked on the parent screen, so the shallow-cloned args stay
+     *  live; if a replay ever does hit a stale frame the invoke throws and the sole caller (FullInjectAgent.
+     *  restoreAndOpen) catches it, logs DEFERRED_JOIN_FAILURE and reopens the gate — the user simply retries. */
     public static void open() {
         Call call;
         synchronized (JoinGate.class) {
