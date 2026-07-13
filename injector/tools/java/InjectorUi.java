@@ -586,9 +586,9 @@ public final class InjectorUi extends JFrame {
         }
     }
 
-    /** Best-effort OS window title per PID, so the picker can show e.g. "Minecraft 26.2 - Singleplayer" to tell apart
-     *  multiple instances. Windows: the Window Title column of {@code tasklist /v}. Linux/other: {@code wmctrl -lp}
-     *  when present. Any failure just yields no title (the column stays blank). */
+    /** Best-effort OS window title per PID, so the picker can show e.g. "Minecraft 26.2" to tell apart multiple
+     *  instances. Windows: the Window Title column of {@code tasklist /v}. Linux/other: {@code xdotool} (works without
+     *  a window manager) then {@code wmctrl}. Any failure just yields no title (the column stays blank). */
     private static Map<Long, String> windowTitles() {
         Map<Long, String> titles = new HashMap<>();
         boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
@@ -613,23 +613,44 @@ public final class InjectorUi extends JFrame {
                 } catch (Exception ignored) { }
             }
         } else {
-            try {   // wmctrl -lp -> "0xWINID  desktop  PID  host  title..."
-                Process p = new ProcessBuilder("wmctrl", "-lp").redirectErrorStream(true).start();
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        String[] parts = line.trim().split("\\s+", 5);
-                        if (parts.length < 5) continue;
-                        try {
-                            long pid = Long.parseLong(parts[2]);
-                            if (pid > 0 && !parts[4].isBlank()) titles.putIfAbsent(pid, parts[4].trim());
-                        } catch (NumberFormatException ignored) { }
-                    }
+            // Linux/other: prefer xdotool — it queries X directly via _NET_WM_PID, so it works even without a window
+            // manager (GLFW sets that on the Minecraft window). Fall back to wmctrl, which needs a running WM.
+            for (String id : runLines("xdotool", "search", "--name", ".+")) {
+                if (id.isBlank()) continue;
+                List<String> pidOut = runLines("xdotool", "getwindowpid", id.trim());
+                List<String> nameOut = runLines("xdotool", "getwindowname", id.trim());
+                if (pidOut.isEmpty() || nameOut.isEmpty()) continue;
+                try {
+                    long pid = Long.parseLong(pidOut.get(0).trim());
+                    String name = nameOut.get(0).trim();
+                    if (pid > 0 && !name.isBlank()) titles.putIfAbsent(pid, name);
+                } catch (NumberFormatException ignored) { }
+            }
+            if (titles.isEmpty()) {   // wmctrl -lp -> "0xWINID  desktop  PID  host  title..."
+                for (String line : runLines("wmctrl", "-lp")) {
+                    String[] parts = line.trim().split("\\s+", 5);
+                    if (parts.length < 5) continue;
+                    try {
+                        long pid = Long.parseLong(parts[2]);
+                        if (pid > 0 && !parts[4].isBlank()) titles.putIfAbsent(pid, parts[4].trim());
+                    } catch (NumberFormatException ignored) { }
                 }
-                p.waitFor();
-            } catch (Exception ignored) { }
+            }
         }
         return titles;
+    }
+
+    /** Run a command and return its stdout+stderr lines; empty on any failure (missing binary, non-zero exit, etc.). */
+    private static List<String> runLines(String... command) {
+        List<String> out = new ArrayList<>();
+        try {
+            Process p = new ProcessBuilder(command).redirectErrorStream(true).start();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line; while ((line = r.readLine()) != null) out.add(line);
+            }
+            p.waitFor();
+        } catch (Exception ignored) { }
+        return out;
     }
 
     /** Parse one RFC-4180-ish CSV row (double-quoted fields, "" escapes), as emitted by {@code tasklist /FO CSV}. */
