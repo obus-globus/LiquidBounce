@@ -38,9 +38,12 @@ public final class InjectorUi extends JFrame {
     private final JTable processTable = new JTable(processModel);
     private final JTextField agentField = new JTextField();
     private final JTextField dataDirField = new JTextField();
+    private final JComboBox<String> dataModeCombo = new JComboBox<>(new String[]{"Client game directory", "Working directory", "Custom folder…"});
     private final JTextArea logArea = new JTextArea();
     private final JButton refreshButton = new JButton("Refresh");
     private final JButton injectButton = new JButton("Inject LiquidBounce");
+    private final JButton uninjectButton = new JButton("Uninject");
+    private final JButton checkButton = new JButton("Check compatibility");
     private final JProgressBar progressBar = new JProgressBar(0, 100);
     private SwingWorker<Void, String> logTailWorker;
     private volatile boolean tailingInjectionLog;
@@ -86,14 +89,24 @@ public final class InjectorUi extends JFrame {
         browseButton.addActionListener(event -> browseForAgent());
         agentPanel.add(browseButton, BorderLayout.EAST);
 
-        // LiquidBounce data folder (the folder that will hold LiquidBounce/). Blank = the client's game directory.
+        // Where LiquidBounce/ is created: the client's game directory (default), its working directory, or a custom folder.
         JPanel dataDirPanel = new JPanel(new BorderLayout(8, 0));
         JLabel dataLabel = new JLabel("Data folder:");
         dataDirPanel.add(dataLabel, BorderLayout.WEST);
-        dataDirField.setToolTipText("Folder that will contain LiquidBounce/ (config, accounts, CEF cache). Leave blank to use the client's game directory.");
-        dataDirPanel.add(dataDirField, BorderLayout.CENTER);
         JButton dataBrowse = new JButton("Browse...");
         dataBrowse.addActionListener(event -> browseForDataDir());
+        dataDirField.setToolTipText("Folder that will contain LiquidBounce/ (config, accounts, CEF cache).");
+        dataModeCombo.setToolTipText("Where to create the LiquidBounce/ folder in the injected client.");
+        dataModeCombo.addActionListener(event -> {
+            boolean custom = dataModeCombo.getSelectedIndex() == 2;
+            dataDirField.setEnabled(custom);
+            dataBrowse.setEnabled(custom);
+        });
+        dataDirField.setEnabled(false); dataBrowse.setEnabled(false);   // default mode = game directory
+        JPanel dataCenter = new JPanel(new BorderLayout(8, 0));
+        dataCenter.add(dataModeCombo, BorderLayout.WEST);
+        dataCenter.add(dataDirField, BorderLayout.CENTER);
+        dataDirPanel.add(dataCenter, BorderLayout.CENTER);
         dataDirPanel.add(dataBrowse, BorderLayout.EAST);
 
         Dimension labelSize = new Dimension(84, dataLabel.getPreferredSize().height);
@@ -117,8 +130,16 @@ public final class InjectorUi extends JFrame {
         JPanel actions = new JPanel(new BorderLayout(10, 8));
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         refreshButton.addActionListener(event -> refreshProcesses());
+        checkButton.addActionListener(event -> checkCompatibility());
+        checkButton.setToolTipText("Attach read-only to the selected process and report whether it's a compatible injection target (Java 25+, loader, Minecraft version). Does not inject or load anything.");
+        uninjectButton.addActionListener(event -> uninject());
+        uninjectButton.setToolTipText("<html>Removes LiquidBounce from the selected client &mdash; shuts it down (browser, listeners) and reverts the game bytecode back to vanilla.<br><br>"
+                + "<b>Note:</b> you cannot inject again into the same client afterwards &mdash; restart it first.<br>"
+                + "Uninject also does <b>not</b> remove LiquidBounce from the process memory (its classes stay loaded until the client exits).</html>");
         injectButton.addActionListener(event -> inject());
         buttons.add(refreshButton);
+        buttons.add(checkButton);
+        buttons.add(uninjectButton);
         buttons.add(injectButton);
         progressBar.setStringPainted(true);
         progressBar.setString("Ready");
@@ -137,7 +158,11 @@ public final class InjectorUi extends JFrame {
     }
 
     private void updateInjectEnabled() {
-        injectButton.setEnabled(processTable.getSelectedRow() >= 0 && new File(agentField.getText().trim()).isFile());
+        boolean sel = processTable.getSelectedRow() >= 0;
+        boolean ready = sel && new File(agentField.getText().trim()).isFile();
+        injectButton.setEnabled(ready);
+        uninjectButton.setEnabled(ready);
+        checkButton.setEnabled(sel);
     }
 
     private void browseForAgent() {
@@ -200,7 +225,10 @@ public final class InjectorUi extends JFrame {
         }.execute();
     }
 
-    private void inject() {
+    private void inject() { attachAgent(false); }
+    private void uninject() { attachAgent(true); }
+
+    private void attachAgent(boolean uninject) {
         int selected = processTable.getSelectedRow();
         if (selected < 0) return;
         MinecraftProcess process = processModel.row(selected);
@@ -210,30 +238,40 @@ public final class InjectorUi extends JFrame {
                     "Missing agent", JOptionPane.ERROR_MESSAGE);
             return;
         }
+        String verb = uninject ? "uninjection" : "injection";
+        String Verb = uninject ? "Uninjection" : "Injection";
 
-        appendLog("Starting injection into PID " + process.pid + ".");
+        appendLog("Starting " + verb + (uninject ? " from PID " : " into PID ") + process.pid + ".");
         tailingInjectionLog = false;
         File injectionLog;
         try {
-            injectionLog = new File(System.getProperty("java.io.tmpdir"), "liquidbounce-injection-" + process.pid + ".log");
+            injectionLog = new File(System.getProperty("java.io.tmpdir"), "liquidbounce-" + verb + "-" + process.pid + ".log");
             Files.writeString(injectionLog.toPath(), "", StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-            startInjectionLogTail(injectionLog);
-            appendLog("Dedicated injection log: " + injectionLog.getAbsolutePath());
+            startInjectionLogTail(injectionLog, uninject);
+            appendLog("Dedicated " + verb + " log: " + injectionLog.getAbsolutePath());
         } catch (Exception logFailure) {
             injectionLog = null;
-            appendLog("Could not create the dedicated injection log: " + logFailure.getMessage());
+            appendLog("Could not create the dedicated " + verb + " log: " + logFailure.getMessage());
         }
         File finalInjectionLog = injectionLog;
-        final String dataDir = dataDirField.getText().trim();   // captured on the EDT
-        setBusy(true, "Attaching ...", 15);
+        final int dataMode = dataModeCombo.getSelectedIndex();   // 0=game dir, 1=working dir, 2=custom
+        final String dataDir = dataDirField.getText().trim();    // captured on the EDT
+        setBusy(true, uninject ? "Attaching (uninject) ..." : "Attaching ...", 15);
         new SwingWorker<Void, LogUpdate>() {
             @Override protected Void doInBackground() throws Exception {
                 StringBuilder args = new StringBuilder();
-                if (finalInjectionLog != null) args.append("logFile=").append(finalInjectionLog.getAbsolutePath());
-                if (!dataDir.isEmpty()) {
+                if (uninject) args.append("mode=uninject");
+                if (finalInjectionLog != null) {
                     if (args.length() > 0) args.append(AGENT_ARG_SEP);
-                    args.append("gameDir=").append(dataDir);
+                    args.append("logFile=").append(finalInjectionLog.getAbsolutePath());
+                }
+                if (!uninject) {   // 0 (game dir) -> no gameDir arg (agent resolves it); 1 -> "." (working dir); 2 -> custom path.
+                    String gameDir = dataMode == 1 ? "." : (dataMode == 2 && !dataDir.isEmpty()) ? dataDir : null;
+                    if (gameDir != null) {
+                        if (args.length() > 0) args.append(AGENT_ARG_SEP);
+                        args.append("gameDir=").append(gameDir);
+                    }
                 }
                 String agentArgs = args.toString();
                 Injector.inject(Long.toString(process.pid), jar, agentArgs, message -> {
@@ -257,25 +295,26 @@ public final class InjectorUi extends JFrame {
                 try {
                     get();
                     if (tailingInjectionLog) {
-                        appendLog("Agent delivered; waiting for LiquidBounce initialization to finish.");
-                        setProgressIfHigher(70, "Initializing LiquidBounce ...");
+                        appendLog(uninject ? "Agent delivered; waiting for uninjection to finish."
+                                : "Agent delivered; waiting for LiquidBounce initialization to finish.");
+                        setProgressIfHigher(70, uninject ? "Uninjecting ..." : "Initializing LiquidBounce ...");
                     } else {
-                        appendLog("Injection completed successfully (target log unavailable). ");
+                        appendLog(Verb + " completed successfully (target log unavailable). ");
                         progressBar.setValue(100);
-                        progressBar.setString("Injection successful");
+                        progressBar.setString(Verb + " successful");
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    appendLog("Injection interrupted.");
+                    appendLog(Verb + " interrupted.");
                     progressBar.setString("Interrupted");
                 } catch (ExecutionException e) {
                     String message = rootMessage(e);
-                    appendLog("INJECTION FAILED: " + message);
-                    progressBar.setString("Injection failed");
+                    appendLog(Verb.toUpperCase() + " FAILED: " + message);
+                    progressBar.setString(Verb + " failed");
                     if (logTailWorker != null) logTailWorker.cancel(true);
                     tailingInjectionLog = false;
                     JOptionPane.showMessageDialog(InjectorUi.this,
-                            "Injection failed:\n" + message + "\n\nSee the injection log for details.",
+                            Verb + " failed:\n" + message + "\n\nSee the log for details.",
                             "LiquidBounce Injector", JOptionPane.ERROR_MESSAGE);
                 } finally {
                     if (!tailingInjectionLog)
@@ -285,17 +324,92 @@ public final class InjectorUi extends JFrame {
         }.execute();
     }
 
-    private void startInjectionLogTail(File logFile) {
+    private void checkCompatibility() {
+        int selected = processTable.getSelectedRow();
+        if (selected < 0) return;
+        MinecraftProcess process = processModel.row(selected);
+        setBusy(true, "Checking compatibility ...", 20);
+        appendLog("Checking compatibility of PID " + process.pid + " (read-only) ...");
+        new SwingWorker<String, Void>() {
+            @Override protected String doInBackground() { return compatibilityReport(process.pid); }
+            @Override protected void done() {
+                try { for (String line : get().split("\n")) appendLog(line); }
+                catch (Exception e) { appendLog("Compatibility check failed: " + rootMessage(e)); }
+                finally {
+                    progressBar.setValue(100); progressBar.setString("Compatibility check done");
+                    setBusy(false, progressBar.getString(), 100);
+                }
+            }
+        }.execute();
+    }
+
+    /** Attach read-only to the target, read its system properties, detach — reports whether it's a compatible
+     *  injection target. No agent is loaded, so this has no side effect on the client. */
+    private static String compatibilityReport(long pid) {
+        StringBuilder r = new StringBuilder();
+        VirtualMachine vm = null;
+        try {
+            vm = VirtualMachine.attach(Long.toString(pid));
+            java.util.Properties p = vm.getSystemProperties();
+            String javaVer = p.getProperty("java.specification.version", p.getProperty("java.version", "?"));
+            String cmd = p.getProperty("sun.java.command", "");
+            String cp = p.getProperty("java.class.path", "").toLowerCase();
+            int major = parseJavaMajor(javaVer);
+            boolean javaOk = major >= 25;
+            r.append(javaOk ? "  [OK]   " : "  [FAIL] ").append("Java runtime: ").append(javaVer)
+                    .append(javaOk ? "" : "  — LiquidBounce nextgen requires Java 25+").append('\n');
+            String lower = cmd.toLowerCase();
+            String loader = (lower.contains("knot") || cp.contains("fabric-loader")) ? "Fabric"
+                    : (lower.contains("fml") || lower.contains("neoforge") || cp.contains("neoforge")) ? "NeoForge"
+                    : lower.contains("net.minecraft.client.main.main") ? "Vanilla" : "unknown";
+            boolean loaderOk = !loader.equals("unknown");
+            r.append(loaderOk ? "  [OK]   " : "  [??]   ").append("Loader: ").append(loader)
+                    .append(loaderOk ? "" : "  — could not identify the mod loader (is this Minecraft?)").append('\n');
+            String mc = extractMcVersion(cmd, cp);
+            boolean mcOk = "26.2".equals(mc);
+            r.append(mcOk ? "  [OK]   " : "  [??]   ").append("Minecraft version: ").append(mc == null ? "unknown" : mc)
+                    .append(mcOk ? "" : "  — this agent targets 26.2; verify the client's version").append('\n');
+            r.append('\n').append(javaOk && loaderOk
+                    ? (mcOk ? "=> COMPATIBLE." : "=> Likely compatible — confirm the Minecraft version is 26.2.")
+                    : "=> NOT a compatible target — see the issues above.");
+        } catch (Throwable t) {
+            r.append("Could not attach to PID ").append(pid).append(": ").append(rootMessage(t))
+                    .append("\n(The process may have exited, or may be a JVM you cannot attach to.)");
+        } finally {
+            if (vm != null) try { vm.detach(); } catch (Exception ignored) {}
+        }
+        return r.toString();
+    }
+
+    private static int parseJavaMajor(String version) {
+        try {
+            String v = version.trim();
+            if (v.startsWith("1.")) v = v.substring(2);              // 1.8 -> 8
+            Matcher m = Pattern.compile("^(\\d+)").matcher(v);
+            return m.find() ? Integer.parseInt(m.group(1)) : -1;
+        } catch (Exception e) { return -1; }
+    }
+
+    private static String extractMcVersion(String cmd, String cpLower) {
+        Matcher m = Pattern.compile("--version\\s+(\\S+)").matcher(cmd);
+        if (m.find()) return m.group(1);
+        m = Pattern.compile("minecraft[-_/]?(\\d+\\.\\d+(?:\\.\\d+)?)").matcher(cpLower);
+        if (m.find()) return m.group(1);
+        return null;
+    }
+
+    private void startInjectionLogTail(File logFile, boolean uninject) {
         if (logTailWorker != null && !logTailWorker.isDone()) logTailWorker.cancel(true);
         tailingInjectionLog = true;
         long startOffset = logFile.length();
+        String successMarker = uninject ? "UNINJECT complete" : "LiquidBounce initialization completed";
         logTailWorker = new SwingWorker<>() {
-            private boolean sawInitializationSuccess;
+            private boolean sawSuccess;
 
             @Override protected Void doInBackground() throws Exception {
                 long deadline = System.currentTimeMillis() + 5 * 60_000L;
                 try (RandomAccessFile input = new RandomAccessFile(logFile, "r")) {
-                    // Only show lines produced by this injection, not the entire Minecraft session.
+                    // Only show lines produced by this attach, not the entire Minecraft session.
                     input.seek(Math.min(startOffset, input.length()));
                     while (!isCancelled() && System.currentTimeMillis() < deadline) {
                         String encodedLine = input.readLine();
@@ -305,11 +419,14 @@ public final class InjectorUi extends JFrame {
                         }
                         String line = new String(encodedLine.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
                         if (isInjectionLogLine(line)) publish(line);
-                        if (line.contains("LiquidBounce initialization completed")) {
-                            sawInitializationSuccess = true;
+                        if (line.contains(successMarker)) {
+                            sawSuccess = true;
+                            if (uninject) break;
                             deadline = Math.min(deadline, System.currentTimeMillis() + 15_000L);
                         }
-                        if (line.contains("[LB-INJECT]")
+                        if (uninject) {
+                            if (line.contains("uninject failed") || line.contains("Game crashed")) break;
+                        } else if (line.contains("[LB-INJECT]")
                                 && (line.contains("restored original state") || line.contains("initialization failed"))
                                 || line.contains("Game crashed")) {
                             break;
@@ -322,18 +439,19 @@ public final class InjectorUi extends JFrame {
             @Override protected void process(List<String> lines) {
                 for (String line : lines) {
                     appendInjectionLog(line);
-                    applyInjectionProgress(line);
+                    if (!uninject) applyInjectionProgress(line);
                 }
             }
 
             @Override protected void done() {
-                if (!isCancelled() && sawInitializationSuccess && progressBar.getValue() < 100) {
+                String label = uninject ? "uninjection" : "injection";
+                if (!isCancelled() && sawSuccess) {
                     progressBar.setValue(100);
-                    progressBar.setString("LiquidBounce injection complete");
-                    appendLog("LiquidBounce injection completed successfully.");
+                    progressBar.setString(uninject ? "LiquidBounce uninjected" : "LiquidBounce injection complete");
+                    appendLog("LiquidBounce " + label + " completed successfully.");
                 } else if (!isCancelled() && progressBar.getValue() < 100) {
-                    appendLog("Stopped waiting for the LiquidBounce completion marker.");
-                    progressBar.setString("Injection log monitoring ended");
+                    appendLog("Stopped waiting for the " + label + " completion marker.");
+                    progressBar.setString(uninject ? "Uninjection log monitoring ended" : "Injection log monitoring ended");
                 }
                 tailingInjectionLog = false;
                 setBusy(false, progressBar.getString(), progressBar.getValue());
@@ -390,7 +508,7 @@ public final class InjectorUi extends JFrame {
         agentField.setEnabled(!busy);
         progressBar.setValue(progress);
         progressBar.setString(text);
-        if (busy) injectButton.setEnabled(false); else updateInjectEnabled();
+        if (busy) { injectButton.setEnabled(false); uninjectButton.setEnabled(false); checkButton.setEnabled(false); } else updateInjectEnabled();
     }
 
     private void appendLog(String message) {
@@ -559,6 +677,10 @@ public final class InjectorUi extends JFrame {
     }
 
     public static void main(String[] args) {
+        if (args.length > 1 && args[0].equals("--check")) {
+            System.out.println(compatibilityReport(Long.parseLong(args[1])));
+            return;
+        }
         if (args.length > 0 && args[0].equals("--list")) {
             DiscoveryResult discovery = findMinecraftProcesses();
             System.out.println("fallback=" + discovery.fallback);

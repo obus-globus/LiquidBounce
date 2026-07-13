@@ -449,12 +449,15 @@ public class FullInjectAgent {
         String dir = null;
         try {
             String override = InjectionLogger.argValue(a, "gameDir");
-            if (override != null && !override.isBlank()) {
-                dir = new File(override).getAbsolutePath();
-            } else {
+            if (override == null || override.isBlank()) {
+                // default: the client's REAL game directory (matches a normal install)
                 Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft", false, SYS);
                 Object gd = mcCls.getField("gameDirectory").get(mcCls.getMethod("getInstance").invoke(null));
                 if (gd instanceof File file) dir = file.getAbsolutePath();
+            } else if (override.equals(".")) {
+                dir = System.getProperty("user.dir");      // the client's working directory (CWD)
+            } else {
+                dir = new File(override).getAbsoluteFile().toPath().normalize().toString();
             }
         } catch (Throwable t) { InjectionLogger.warn("could not resolve game directory ("+rootMsg(t)+"); LiquidBounce falls back to the process working directory"); }
         if (dir != null) {
