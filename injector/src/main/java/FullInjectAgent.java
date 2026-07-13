@@ -35,7 +35,9 @@ public class FullInjectAgent {
 
     public static void agentmain(String a, Instrumentation inst) throws Exception {
         InjectionLogger.configure(a);
-        if ("uninject".equals(InjectionLogger.argValue(a, "mode"))) { INST = inst; uninject(inst); return; }
+        if ("uninject".equals(InjectionLogger.argValue(a, "mode"))) { INST = inst;
+            try { uninject(inst); } catch (Throwable t) { InjectionLogger.error("uninject failed", t); throw t; }
+            return; }
         if (everInjected) { InjectionLogger.error("re-injection refused: LiquidBounce was already injected into this JVM. Re-injecting after an uninject is not supported (its runtime cannot be re-staged onto the already-populated loader). Restart the client to inject again.");
             throw new IllegalStateException("re-injection after uninject is not supported in the same JVM; restart the client"); }
         INST = inst;
@@ -229,7 +231,10 @@ public class FullInjectAgent {
         Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft", false, SYS);
         Object mc = mcCls.getMethod("getInstance").invoke(null);
         CompletableFuture<Throwable> done = new CompletableFuture<>();
-        Runnable task = () -> { Throwable err = null; try {
+        java.util.concurrent.atomic.AtomicBoolean claimed = new java.util.concurrent.atomic.AtomicBoolean();
+        Runnable task = () -> { Throwable err = null;
+            if (!claimed.compareAndSet(false, true)) { done.complete(null); return; }   // waiter already gave up -> do NOT revert
+            try {
             // 1) LB's own teardown (unregister listeners, stop threads, save config, stop the CEF browser).
             try {
                 Class<?> em = Class.forName("net.ccbluex.liquidbounce.event.EventManager", true, SYS);
@@ -270,13 +275,19 @@ public class FullInjectAgent {
                     InjectionLogger.info("uninject: cleared LiquidBounce screen -> returned to in-game");
                 }
             } catch (Throwable t) { InjectionLogger.warn("uninject: could not clear LB screen -> " + rootMsg(t)); }
+            CFT = null;   // teardown ran on the MC thread -> clear here so agent state matches what actually happened
         } catch (Throwable t) { err = t; } finally { done.complete(err); } };
         mcCls.getMethod("execute", Runnable.class).invoke(mc, task);
         Throwable err;
         try { err = done.get(60, TimeUnit.SECONDS); }
-        catch (TimeoutException t) { throw new IllegalStateException("uninject timed out waiting for the MC main thread"); }
+        catch (TimeoutException t) {
+            if (claimed.compareAndSet(false, true))   // we win the claim -> the queued task will now no-op, so nothing was reverted
+                throw new IllegalStateException("uninject timed out waiting for the MC main thread; teardown was NOT performed (retry, or restart the client)");
+            // the task already started (it holds the render thread) -> wait for it to finish rather than abandon a half-revert
+            try { err = done.get(60, TimeUnit.SECONDS); }
+            catch (TimeoutException t2) { throw new IllegalStateException("uninject is still running on the MC main thread after 120s; the client may be wedged"); }
+        }
         if (err != null) throw new IllegalStateException("uninject failed on the MC main thread: " + rootMsg(err), err);
-        CFT = null;
         InjectionLogger.info("=== UNINJECT complete; LiquidBounce removed from the running client ===");
     }
 

@@ -690,7 +690,8 @@ public final class InjectorUi extends JFrame {
 
     public static void main(String[] args) {
         if (args.length > 1 && args[0].equals("--check")) {
-            System.out.println(compatibilityReport(Long.parseLong(args[1])));
+            try { System.out.println(compatibilityReport(Long.parseLong(args[1].trim()))); }
+            catch (NumberFormatException e) { System.err.println("usage: InjectorUi --check <pid>"); System.exit(2); }
             return;
         }
         if (args.length > 0 && args[0].equals("--list")) {

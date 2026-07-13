@@ -40,7 +40,10 @@ final class Jattach {
         if (agentReturn[0] != Integer.MIN_VALUE && agentReturn[0] != 0)
             throw new IllegalStateException("the agent's Agent_OnAttach returned " + agentReturn[0]
                     + " (agentmain failed inside the client — check the target's log)");
-        log.accept("Agent loaded successfully (jattach).");
+        if (agentReturn[0] == Integer.MIN_VALUE)   // could not parse a return code -> inconclusive, not a guaranteed success
+            log.accept("Warning: jattach did not report an agent return code — the agent MAY have failed; watch the injection log for confirmation.");
+        else
+            log.accept("Agent load delivered via jattach (return code 0).");
     }
 
     /** Target JVM system properties via `jattach <pid> jcmd VM.system_properties` (a lightweight jcmd, loads no agent). */
@@ -62,7 +65,10 @@ final class Jattach {
         return proc.waitFor();
     }
 
-    private static java.io.File extractBinary() throws IOException {
+    private static volatile java.io.File cachedBinary;
+
+    private static synchronized java.io.File extractBinary() throws IOException {
+        if (cachedBinary != null && cachedBinary.canExecute()) return cachedBinary;   // extract once per run
         String os = System.getProperty("os.name", "").toLowerCase();
         String arch = System.getProperty("os.arch", "").toLowerCase();
         String resource, outName;
@@ -70,14 +76,16 @@ final class Jattach {
         else if (os.contains("mac") || os.contains("darwin")) { resource = "jattach-macos"; outName = "jattach"; }
         else if (arch.contains("aarch64") || arch.contains("arm64")) { resource = "jattach-linux-arm64"; outName = "jattach"; }
         else { resource = "jattach-linux-x64"; outName = "jattach"; }
-        Path dir = Paths.get(System.getProperty("java.io.tmpdir"), "lb-jattach");
-        Files.createDirectories(dir);
+        // Fresh private temp dir (owner-only 0700 + random name on POSIX) so a hostile local user cannot pre-own the
+        // directory or swap the binary between extraction and exec.
+        Path dir = Files.createTempDirectory("lb-jattach-");
         Path out = dir.resolve(outName);
         try (InputStream in = Jattach.class.getResourceAsStream("/jattach/" + resource)) {
             if (in == null) throw new FileNotFoundException("bundled jattach binary /jattach/" + resource + " is missing from the tool jar");
             Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
         }
         out.toFile().setExecutable(true, true);
-        return out.toFile();
+        cachedBinary = out.toFile();
+        return cachedBinary;
     }
 }
