@@ -440,14 +440,19 @@ public final class InjectorUi extends JFrame {
         return root.getClass().getSimpleName() + (message == null || message.isBlank() ? "" : ": " + message);
     }
 
+    private static final String AGENT_JAR_NAME = "liquidbounce-injector-agent.jar";
+
+    /** Default to the agent jar sitting next to the user (cwd first, then beside this tool jar); the usual layout is
+     *  the two jars in the same folder. Falls back to the bare relative name if neither exists. */
     private static String defaultAgentPath() {
+        Path cwd = Path.of("").toAbsolutePath().resolve(AGENT_JAR_NAME);
+        if (Files.isRegularFile(cwd)) return cwd.toString();
         try {
-            Path classes = Path.of(InjectorUi.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-            Path buildDir = classes.getParent();
-            if (buildDir != null && buildDir.getParent() != null)
-                return buildDir.getParent().resolve("build/injector/liquidbounce-injector-agent.jar").toString();
+            Path toolJar = Path.of(InjectorUi.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            Path beside = toolJar.getParent() != null ? toolJar.getParent().resolve(AGENT_JAR_NAME) : null;
+            if (beside != null && Files.isRegularFile(beside)) return beside.toString();
         } catch (URISyntaxException | RuntimeException ignored) { }
-        return "build/injector/liquidbounce-injector-agent.jar";
+        return AGENT_JAR_NAME;
     }
 
     public static void main(String[] args) {
