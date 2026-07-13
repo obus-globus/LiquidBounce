@@ -61,8 +61,9 @@ public final class InjectorUi extends JFrame {
         processTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         processTable.setFillsViewportHeight(true);
         processTable.setRowHeight(24);
-        processTable.getColumnModel().getColumn(0).setPreferredWidth(90);
-        processTable.getColumnModel().getColumn(0).setMaxWidth(120);
+        processTable.getColumnModel().getColumn(0).setPreferredWidth(80);
+        processTable.getColumnModel().getColumn(0).setMaxWidth(110);
+        processTable.getColumnModel().getColumn(1).setPreferredWidth(240);
         processTable.getSelectionModel().addListSelectionListener(this::selectionChanged);
 
         JPanel center = new JPanel(new BorderLayout(0, 10));
@@ -365,6 +366,7 @@ public final class InjectorUi extends JFrame {
     }
 
     private static DiscoveryResult findMinecraftProcesses() {
+        Map<Long, String> titles = windowTitles();
         Map<Long, String> attachable = new HashMap<>();
         for (VirtualMachineDescriptor descriptor : VirtualMachine.list()) {
             try {
@@ -388,16 +390,16 @@ public final class InjectorUi extends JFrame {
             if (!isJava && !attachable.containsKey(handle.pid())) return;
 
             String fallbackLabel = executable.isBlank() ? "Java process" : executable;
-            javaProcesses.put(handle.pid(), new MinecraftProcess(handle.pid(), fallbackLabel + " (command line unavailable)"));
+            javaProcesses.put(handle.pid(), new MinecraftProcess(handle.pid(), fallbackLabel + " (command line unavailable)", titles.getOrDefault(handle.pid(), "")));
 
             if (lower.contains("org.prismlauncher.entrypoint") || lower.contains("net.minecraft.client.main.main")) {
                 String label = attachable.get(handle.pid());
                 if (label == null || label.isBlank()) label = shortCommand(commandLine);
-                matches.add(new MinecraftProcess(handle.pid(), label));
+                matches.add(new MinecraftProcess(handle.pid(), label, titles.getOrDefault(handle.pid(), "")));
             }
         });
-        addTaskListProcesses(javaProcesses, ownPid, "java.exe");
-        addTaskListProcesses(javaProcesses, ownPid, "javaw.exe");
+        addTaskListProcesses(javaProcesses, ownPid, "java.exe", titles);
+        addTaskListProcesses(javaProcesses, ownPid, "javaw.exe", titles);
         Comparator<MinecraftProcess> newestPidFirst = Comparator.comparingLong((MinecraftProcess p) -> p.pid).reversed();
         matches.sort(newestPidFirst);
         List<MinecraftProcess> fallbackProcesses = new ArrayList<>(javaProcesses.values());
@@ -407,7 +409,7 @@ public final class InjectorUi extends JFrame {
                 : new DiscoveryResult(matches, false);
     }
 
-    private static void addTaskListProcesses(Map<Long, MinecraftProcess> processes, long ownPid, String imageName) {
+    private static void addTaskListProcesses(Map<Long, MinecraftProcess> processes, long ownPid, String imageName, Map<Long, String> titles) {
         try {
             Process tasklist = new ProcessBuilder("tasklist.exe", "/FI", "IMAGENAME eq " + imageName, "/FO", "CSV", "/NH")
                     .redirectErrorStream(true)
@@ -419,13 +421,76 @@ public final class InjectorUi extends JFrame {
                     if (!matcher.find()) continue;
                     long pid = Long.parseLong(matcher.group(2));
                     if (pid != ownPid)
-                        processes.putIfAbsent(pid, new MinecraftProcess(pid, matcher.group(1) + " (Windows process list)"));
+                        processes.putIfAbsent(pid, new MinecraftProcess(pid, matcher.group(1) + " (Windows process list)", titles.getOrDefault(pid, "")));
                 }
             }
             tasklist.waitFor();
         } catch (Exception ignored) {
             // ProcessHandle and the Attach API remain available on systems where tasklist is restricted.
         }
+    }
+
+    /** Best-effort OS window title per PID, so the picker can show e.g. "Minecraft 26.2 - Singleplayer" to tell apart
+     *  multiple instances. Windows: the Window Title column of {@code tasklist /v}. Linux/other: {@code wmctrl -lp}
+     *  when present. Any failure just yields no title (the column stays blank). */
+    private static Map<Long, String> windowTitles() {
+        Map<Long, String> titles = new HashMap<>();
+        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        if (windows) {
+            for (String image : new String[]{"java.exe", "javaw.exe"}) {
+                try {
+                    Process p = new ProcessBuilder("tasklist.exe", "/v", "/FI", "IMAGENAME eq " + image, "/FO", "CSV", "/NH")
+                            .redirectErrorStream(true).start();
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            List<String> cols = parseCsvRow(line.trim());
+                            if (cols.size() < 2) continue;
+                            try {
+                                long pid = Long.parseLong(cols.get(1).trim());
+                                String title = cols.get(cols.size() - 1).trim();   // Window Title is the last column of /v
+                                if (!title.isBlank() && !title.equals("N/A")) titles.put(pid, title);
+                            } catch (NumberFormatException ignored) { }
+                        }
+                    }
+                    p.waitFor();
+                } catch (Exception ignored) { }
+            }
+        } else {
+            try {   // wmctrl -lp -> "0xWINID  desktop  PID  host  title..."
+                Process p = new ProcessBuilder("wmctrl", "-lp").redirectErrorStream(true).start();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String[] parts = line.trim().split("\\s+", 5);
+                        if (parts.length < 5) continue;
+                        try {
+                            long pid = Long.parseLong(parts[2]);
+                            if (pid > 0 && !parts[4].isBlank()) titles.putIfAbsent(pid, parts[4].trim());
+                        } catch (NumberFormatException ignored) { }
+                    }
+                }
+                p.waitFor();
+            } catch (Exception ignored) { }
+        }
+        return titles;
+    }
+
+    /** Parse one RFC-4180-ish CSV row (double-quoted fields, "" escapes), as emitted by {@code tasklist /FO CSV}. */
+    private static List<String> parseCsvRow(String line) {
+        List<String> out = new ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        boolean inQuotes = false;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (c == '"') {
+                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') { cur.append('"'); i++; }
+                else inQuotes = !inQuotes;
+            } else if (c == ',' && !inQuotes) { out.add(cur.toString()); cur.setLength(0); }
+            else cur.append(c);
+        }
+        out.add(cur.toString());
+        return out;
     }
 
     private static String shortCommand(String commandLine) {
@@ -460,7 +525,7 @@ public final class InjectorUi extends JFrame {
             DiscoveryResult discovery = findMinecraftProcesses();
             System.out.println("fallback=" + discovery.fallback);
             for (MinecraftProcess process : discovery.processes)
-                System.out.println(process.pid + "\t" + process.description);
+                System.out.println(process.pid + "\t" + process.windowTitle + "\t" + process.description);
             return;
         }
         SwingUtilities.invokeLater(() -> {
@@ -472,12 +537,12 @@ public final class InjectorUi extends JFrame {
         });
     }
 
-    private record MinecraftProcess(long pid, String description) { }
+    private record MinecraftProcess(long pid, String description, String windowTitle) { }
     private record DiscoveryResult(List<MinecraftProcess> processes, boolean fallback) { }
     private record LogUpdate(String message, int progress) { }
 
     private static final class ProcessTableModel extends AbstractTableModel {
-        private final String[] columns = {"PID", "JVM / main class"};
+        private final String[] columns = {"PID", "Window title", "JVM / main class"};
         private List<MinecraftProcess> rows = List.of();
 
         void setRows(List<MinecraftProcess> rows) {
@@ -491,7 +556,11 @@ public final class InjectorUi extends JFrame {
         @Override public String getColumnName(int column) { return columns[column]; }
         @Override public Object getValueAt(int row, int column) {
             MinecraftProcess process = rows.get(row);
-            return column == 0 ? process.pid : process.description;
+            return switch (column) {
+                case 0 -> process.pid;
+                case 1 -> process.windowTitle;
+                default -> process.description;
+            };
         }
     }
 }
