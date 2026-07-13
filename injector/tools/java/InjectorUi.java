@@ -32,10 +32,12 @@ import java.util.regex.Pattern;
 public final class InjectorUi extends JFrame {
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final Pattern TASKLIST_CSV = Pattern.compile("^\"([^\"]+)\",\"([0-9]+)\"");
+    private static final char AGENT_ARG_SEP = (char) 1;   // must match lbrt.InjectionLogger.ARG_SEP
 
     private final ProcessTableModel processModel = new ProcessTableModel();
     private final JTable processTable = new JTable(processModel);
     private final JTextField agentField = new JTextField();
+    private final JTextField dataDirField = new JTextField();
     private final JTextArea logArea = new JTextArea();
     private final JButton refreshButton = new JButton("Refresh");
     private final JButton injectButton = new JButton("Inject LiquidBounce");
@@ -70,7 +72,8 @@ public final class InjectorUi extends JFrame {
         center.add(new JScrollPane(processTable), BorderLayout.CENTER);
 
         JPanel agentPanel = new JPanel(new BorderLayout(8, 0));
-        agentPanel.add(new JLabel("Agent JAR:"), BorderLayout.WEST);
+        JLabel agentLabel = new JLabel("Agent JAR:");
+        agentPanel.add(agentLabel, BorderLayout.WEST);
         agentField.setText(initialAgent);
         agentField.setToolTipText("LiquidBounce agent JAR to load into the selected Minecraft JVM");
         agentField.getDocument().addDocumentListener(new DocumentListener() {
@@ -82,7 +85,25 @@ public final class InjectorUi extends JFrame {
         JButton browseButton = new JButton("Browse...");
         browseButton.addActionListener(event -> browseForAgent());
         agentPanel.add(browseButton, BorderLayout.EAST);
-        center.add(agentPanel, BorderLayout.SOUTH);
+
+        // LiquidBounce data folder (the folder that will hold LiquidBounce/). Blank = the client's game directory.
+        JPanel dataDirPanel = new JPanel(new BorderLayout(8, 0));
+        JLabel dataLabel = new JLabel("Data folder:");
+        dataDirPanel.add(dataLabel, BorderLayout.WEST);
+        dataDirField.setToolTipText("Folder that will contain LiquidBounce/ (config, accounts, CEF cache). Leave blank to use the client's game directory.");
+        dataDirPanel.add(dataDirField, BorderLayout.CENTER);
+        JButton dataBrowse = new JButton("Browse...");
+        dataBrowse.addActionListener(event -> browseForDataDir());
+        dataDirPanel.add(dataBrowse, BorderLayout.EAST);
+
+        Dimension labelSize = new Dimension(84, dataLabel.getPreferredSize().height);
+        agentLabel.setPreferredSize(labelSize);
+        dataLabel.setPreferredSize(labelSize);
+
+        JPanel form = new JPanel(new GridLayout(2, 1, 0, 6));
+        form.add(agentPanel);
+        form.add(dataDirPanel);
+        center.add(form, BorderLayout.SOUTH);
         content.add(center, BorderLayout.CENTER);
 
         logArea.setEditable(false);
@@ -129,6 +150,16 @@ public final class InjectorUi extends JFrame {
             agentField.setText(chooser.getSelectedFile().getAbsolutePath());
             updateInjectEnabled();
         }
+    }
+
+    private void browseForDataDir() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Select the folder to hold LiquidBounce/");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        String current = dataDirField.getText().trim();
+        if (!current.isEmpty()) chooser.setSelectedFile(new File(current));
+        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION)
+            dataDirField.setText(chooser.getSelectedFile().getAbsolutePath());
     }
 
     private void refreshProcesses() {
@@ -194,10 +225,17 @@ public final class InjectorUi extends JFrame {
             appendLog("Could not create the dedicated injection log: " + logFailure.getMessage());
         }
         File finalInjectionLog = injectionLog;
+        final String dataDir = dataDirField.getText().trim();   // captured on the EDT
         setBusy(true, "Attaching ...", 15);
         new SwingWorker<Void, LogUpdate>() {
             @Override protected Void doInBackground() throws Exception {
-                String agentArgs = finalInjectionLog == null ? "" : "logFile=" + finalInjectionLog.getAbsolutePath();
+                StringBuilder args = new StringBuilder();
+                if (finalInjectionLog != null) args.append("logFile=").append(finalInjectionLog.getAbsolutePath());
+                if (!dataDir.isEmpty()) {
+                    if (args.length() > 0) args.append(AGENT_ARG_SEP);
+                    args.append("gameDir=").append(dataDir);
+                }
+                String agentArgs = args.toString();
                 Injector.inject(Long.toString(process.pid), jar, agentArgs, message -> {
                     int progress = message.startsWith("Attached") ? 40
                             : message.startsWith("Loading") ? 45

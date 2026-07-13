@@ -35,13 +35,14 @@ public class FullInjectAgent {
 
     public static void agentmain(String a, Instrumentation inst) throws Exception {
         InjectionLogger.configure(a);
-        if (a != null && a.contains("mode=uninject")) { INST = inst; uninject(inst); return; }
+        if ("uninject".equals(InjectionLogger.argValue(a, "mode"))) { INST = inst; uninject(inst); return; }
         if (everInjected) { InjectionLogger.error("re-injection refused: LiquidBounce was already injected into this JVM. Re-injecting after an uninject is not supported (its runtime cannot be re-staged onto the already-populated loader). Restart the client to inject again.");
             throw new IllegalStateException("re-injection after uninject is not supported in the same JVM; restart the client"); }
         INST = inst;
         PLATFORM = detectPlatform(inst);
         SYS = PLATFORM.targetLoader();
         lbrt.Platform.LOADER = SYS;
+        applyDataDir(a);
         verifyAsmRuntime();
         for (Class<?> c : inst.getAllLoadedClasses()) preLoaded.add(c.getName().replace('.','/'));   // snapshot BEFORE we load anything
         inst.redefineModule(Object.class.getModule(), Set.of(), Map.of(), Map.of("java.lang", Set.of(FullInjectAgent.class.getModule())), Set.of(), Map.of());
@@ -441,6 +442,26 @@ public class FullInjectAgent {
         waiter.start();
     }
     static byte[] awApply(String n, byte[] b){ return PLATFORM.applyAw(n, b); }
+    /** Point LiquidBounce's data dir (&lt;gameDir&gt;/LiquidBounce) at the injector-supplied path, else the client's REAL
+     *  game directory — so it matches a normal install instead of landing in whatever working directory the client was
+     *  launched from. Runs before LB's VanillaPlatform reads the vspike.gameDir system property. */
+    static void applyDataDir(String a) {
+        String dir = null;
+        try {
+            String override = InjectionLogger.argValue(a, "gameDir");
+            if (override != null && !override.isBlank()) {
+                dir = new File(override).getAbsolutePath();
+            } else {
+                Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft", false, SYS);
+                Object gd = mcCls.getField("gameDirectory").get(mcCls.getMethod("getInstance").invoke(null));
+                if (gd instanceof File file) dir = file.getAbsolutePath();
+            }
+        } catch (Throwable t) { InjectionLogger.warn("could not resolve game directory ("+rootMsg(t)+"); LiquidBounce falls back to the process working directory"); }
+        if (dir != null) {
+            System.setProperty("vspike.gameDir", dir);
+            InjectionLogger.info("LiquidBounce data directory: " + new File(dir, "LiquidBounce").getAbsolutePath());
+        }
+    }
     /** Pick the platform by probing which loader owns the live client. Default vanilla; modded selects a stub host. */
     static LoaderPlatform detectPlatform(Instrumentation inst) throws Exception {
         if (loaderPresent(inst,"net.fabricmc.loader.impl.launch.knot.KnotClassLoader")) { InjectionLogger.info("detected Fabric (Knot) loader"); return new FabricPlatform(); }
