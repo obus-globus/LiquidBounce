@@ -155,12 +155,17 @@ final class NeoForgePlatform implements LoaderPlatform {
             byte[] xOthers;
             try { xOthers = (byte[]) mTransformClassBytes.invoke(transformer, internal.replace('/','.'), internal.replace('/','.'), pre); }
             catch (Throwable t) {
-                // Another mod's mixin whose injection point diverges on this already-loaded target throws here. Default
-                // is FAIL-FAST (propagate -> abort the inject). With tolerateBaselineFailures=true, skip just this target
-                // (its transform() then falls back to originalO) so one bad mod mixin doesn't kill the whole attach.
-                if (!FullInjectAgent.tolerateBaselineFailures) { if (t instanceof Error e) throw e; if (t instanceof Exception e) throw e; throw new RuntimeException(t); }
+                // Another mod's mixin whose injection point diverges on this already-loaded target throws here. Either
+                // way it is logged. Default is FAIL-FAST: log an error naming the target + abort. With
+                // tolerateBaselineFailures=true, log a warning and skip just this target (its transform() then falls back
+                // to originalO) so one bad mod mixin doesn't kill the whole attach.
                 Throwable c = t instanceof InvocationTargetException && t.getCause() != null ? t.getCause() : t;
-                InjectionLogger.warn("baseline capture skipped (tolerated) for "+internal+" -> "+c.getClass().getSimpleName()+": "+String.valueOf(c.getMessage()).split("\n")[0]);
+                String head = internal+" -> "+c.getClass().getSimpleName()+": "+String.valueOf(c.getMessage()).split("\n")[0];
+                if (!FullInjectAgent.tolerateBaselineFailures) {
+                    InjectionLogger.error("baseline capture FAILED for "+head+" — aborting injection (enable tolerateBaselineFailures / tick 'Tolerate other-mod mixin failures' to skip it and continue)");
+                    if (t instanceof Error e) throw e; if (t instanceof Exception e) throw e; throw new RuntimeException(t);
+                }
+                InjectionLogger.warn("baseline capture skipped (tolerated) for "+head);
                 continue;
             }
             baseline.put(internal, xOthers == null ? pre : xOthers); n++;
