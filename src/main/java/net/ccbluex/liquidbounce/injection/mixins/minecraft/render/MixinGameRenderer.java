@@ -31,6 +31,7 @@ import net.ccbluex.liquidbounce.event.events.PerspectiveEvent;
 import net.ccbluex.liquidbounce.event.events.WorldRenderEvent;
 import net.ccbluex.liquidbounce.features.module.modules.fun.ModuleDankBobbing;
 import net.ccbluex.liquidbounce.features.module.modules.render.*;
+import net.ccbluex.liquidbounce.render.ClientRenderPipelines;
 import net.ccbluex.liquidbounce.utils.collection.Pools;
 import net.ccbluex.liquidbounce.utils.render.WorldToScreen;
 import net.minecraft.client.Camera;
@@ -105,6 +106,11 @@ public abstract class MixinGameRenderer {
         @Local(name = "projectionMatrix") Matrix4f projectionMatrix,
         @Local(name = "modelViewMatrix") Matrix4fc modelViewMatrix
     ) {
+        // Late-attach safety net: the normal precompile trigger (ShaderManager.apply @TAIL) already fired before
+        // injection, so custom-shader world pipelines (ESP/tracers/chams drawn from this event) would otherwise
+        // lazy-compile against the device's default source and mis-cache. This is the earliest custom-draw chokepoint
+        // on the render thread; on the normal startup path `precompiled` is already set so it is a cheap no-op.
+        ClientRenderPipelines.INSTANCE.ensureCompiled();
         var newMatStack = Pools.MatStack.borrow();
         try {
             newMatStack.mulPose(modelViewMatrix);

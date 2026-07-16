@@ -17,7 +17,7 @@ public class FullInjectAgent {
     static final Set<String> targetSet = new HashSet<>();                          // internal names of mixin targets
     static Instrumentation INST;
     static volatile java.lang.instrument.ClassFileTransformer CFT;                 // installed on-load transformer; kept so uninject can remove it
-    static boolean everInjected;                                                  // true once injected; a second inject in the same JVM (even after uninject) is refused — LB can't be re-staged live
+    static volatile boolean everInjected;                                         // true once injected; a second inject in the same JVM (even after uninject) is refused — LB can't be re-staged live. volatile: successive attaches may land on different attach-listener threads.
     static final Set<String> preLoaded = ConcurrentHashMap.newKeySet();            // MC classes loaded at attach (can't be AW-widened)
     static final Map<String,Boolean> npField = new ConcurrentHashMap<>();          // owner#name -> non-public?
     static final Map<String,Boolean> npMethod = new ConcurrentHashMap<>();         // owner#name desc -> non-public?
@@ -139,7 +139,13 @@ public class FullInjectAgent {
                     else { long s=System.nanoTime(); t = RetransformConverter.rebase(cv.target, b); tRebase += System.nanoTime()-s; nRebase++; }
                     if(connect)t=JoinGateRewriter.rewrite(n,t);
                     if (c!=null) { long s=System.nanoTime(); boolean ok=LateAttachVerifier.verifyRetransform(n, b, t); tVerify += System.nanoTime()-s; if(!ok) return null; }
-                    if(!cv.define(p))return null;
+                    if(!cv.define(p)){
+                        // Future-loaded target (c==null) can hit this AFTER the join gate opened; the JVM then defines the
+                        // pristine original with NO LB hooks, so the feature backing this target is silently inert for the
+                        // session. Surface it to the live injection log (not just the verifier report) so it is observable.
+                        InjectionLogger.error("sidecar/state define failed for "+n+" — it will load WITHOUT LiquidBounce hooks (that feature is inert this session; restart the client to retry)");
+                        return null;
+                    }
                     if (c==null) { byte[] w=awApply(n,t); if(w!=null) t=w; }
                     return t; }
                 if (n.startsWith("net/ccbluex/")) {

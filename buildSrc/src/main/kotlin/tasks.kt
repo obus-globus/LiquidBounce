@@ -674,7 +674,10 @@ abstract class MixinDivergenceCheckTask : DefaultTask() {
         return MixinInfo(node.name, targets, injectors)
     }
 
-    /** Reads the `value` (class targets) of a `@Mixin` annotation. String `targets` are skipped. */
+    /** Reads the class targets of a `@Mixin` annotation: `value = {A.class, …}` (Type) AND the string form
+     *  `targets = {"a.b.C$1"}` (fully-qualified names, normalised to internal names — resolvable against the patched
+     *  jar exactly like value targets). Skipping the string form silently drops those mixins from the divergence
+     *  check (e.g. an anonymous-class target with a real @ModifyReceiver would go unvalidated). */
     private fun readMixinTargets(annotation: AnnotationNode): List<String> {
         val value = annotation.values ?: return emptyList()
         val result = ArrayList<String>()
@@ -682,11 +685,16 @@ abstract class MixinDivergenceCheckTask : DefaultTask() {
         while (i < value.size) {
             val key = value[i] as String
             val v = value[i + 1]
-            if (key == "value") {
+            when (key) {
                 // Either a single Type or a List<Type> for value = {A.class, B.class}.
-                when (v) {
+                "value" -> when (v) {
                     is Type -> result += v.internalName
                     is List<*> -> v.filterIsInstance<Type>().mapTo(result) { it.internalName }
+                }
+                // targets = "a.b.C" or {"a.b.C", …} — dotted binary names; '.' -> '/' (inner-class '$' is preserved).
+                "targets" -> when (v) {
+                    is String -> result += v.replace('.', '/')
+                    is List<*> -> v.filterIsInstance<String>().mapTo(result) { it.replace('.', '/') }
                 }
             }
             i += 2

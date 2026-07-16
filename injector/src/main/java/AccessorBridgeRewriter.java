@@ -139,6 +139,9 @@ public final class AccessorBridgeRewriter {
         if (t.getSort() == Type.VOID) { in.add(new InsnNode(Opcodes.POP)); in.add(new InsnNode(Opcodes.RETURN)); return; }
         if (primitive(t)) {
             String owner = boxOwner(t);
+            // Guard the unbox: a null reflective result (only possible on a descriptor mismatch) would NPE opaquely at
+            // INVOKEVIRTUAL; AwReflect.nn() turns that into a clear diagnostic instead.
+            in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, AWR, "nn", "(Ljava/lang/Object;)Ljava/lang/Object;", false));
             in.add(new TypeInsnNode(Opcodes.CHECKCAST, owner));
             in.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, owner, unboxName(t), "()" + t.getDescriptor(), false));
             in.add(new InsnNode(t.getOpcode(Opcodes.IRETURN)));

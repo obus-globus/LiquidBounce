@@ -241,13 +241,15 @@ public class RetransformConverter {
     void addSidecarClinit(ClassNode S) {
         MethodNode c = new MethodNode(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
         InsnList in = c.instructions;
-        // IDENTITY-keyed per-instance store: must NOT call target.hashCode()/equals() — a mixin-modified hashCode()
-        // that reads a relocated field would recurse into getState() -> map.get(self) -> hashCode() -> StackOverflow.
-        // (Also correct in general: per-instance state keys on object identity, not value-equality.)
-        in.add(new TypeInsnNode(Opcodes.NEW, "java/util/IdentityHashMap"));
+        // WEAK-IDENTITY per-instance store (lbrt.WeakIdentityHashMap): keys weakly by object identity, so relocated
+        // @Unique state is collected with its target instead of leaking for the whole session — a real @Unique field
+        // dies with its object, and this must match (targets like per-frame EntityRenderState / per-line GuiMessage /
+        // PlayerInfo churn hard). It must NOT call target.hashCode()/equals(): a mixin-modified hashCode() reading a
+        // relocated field would recurse into getState() -> map.get(self) -> hashCode(). WeakHashMap can't be used
+        // (it keys on equals/hashCode); IdentityHashMap can't (strong keys -> unbounded leak). Thread-safe internally.
+        in.add(new TypeInsnNode(Opcodes.NEW, "lbrt/WeakIdentityHashMap"));
         in.add(new InsnNode(Opcodes.DUP));
-        in.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/util/IdentityHashMap", "<init>", "()V", false));
-        in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/util/Collections", "synchronizedMap", "(Ljava/util/Map;)Ljava/util/Map;", false));
+        in.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "lbrt/WeakIdentityHashMap", "<init>", "()V", false));
         in.add(new FieldInsnNode(Opcodes.PUTSTATIC, sidecar, "STATE", "Ljava/util/Map;"));
         in.add(new InsnNode(Opcodes.RETURN));
         c.maxStack = 2; c.maxLocals = 0; S.methods.add(c);

@@ -33,6 +33,12 @@ public class AccessWidener {
                 }
                 if (t.length < 3) continue;
                 String access = t[0], type = t[1], owner = t[2];
+                // AW-v2 marks directives that propagate to dependents with a `transitive-` prefix. For this standalone,
+                // local applier (we widen the class in place, not across a mod graph) transitivity is irrelevant, so
+                // normalise `transitive-accessible` -> `accessible` etc. Without this the v2 line matches no branch below
+                // and is SILENTLY dropped while the class is still marked touched, so the widen never happens and a
+                // dependent mixin later fails with a confusing accessibility/LVT error.
+                if (access.startsWith("transitive-")) access = access.substring("transitive-".length());
                 touchedClasses.add(owner);
                 switch (type) {
                     case "class":

@@ -519,18 +519,22 @@ object ClientRenderPipelines {
 
         precompile()
 
-        // If a draw already lazy-compiled a pipeline before we got here, the device cached the
-        // failed compile and the precompile above was silently ignored for it. Detect that on
-        // the pipeline used first (the JCEF browser quad) and reset the device caches — vanilla
-        // pipelines simply recompile lazily from the default source afterwards.
-        if (!gpuDevice.precompilePipeline(JCEF.BGRA_BLURRED_TEXTURE, shaderSource).isValid) {
+        // If a draw already lazy-compiled a pipeline before we got here, the device cached the failed compile and the
+        // precompile above was silently ignored for it. Probe BOTH a browser pipeline (JCEF quad) AND a custom-shader
+        // WORLD pipeline ([OutlineQuads], which references [ClientShaders]) — the world path (ESP/tracers/chams) draws
+        // BEFORE the browser overlay each frame, so on late-attach it is the more likely victim of a poisoned cache;
+        // probing only JCEF would leave a mis-cached world pipeline unrepaired for the whole session. Reset if EITHER
+        // is invalid — vanilla pipelines simply recompile lazily from the default source afterwards.
+        fun bothValid() = gpuDevice.precompilePipeline(JCEF.BGRA_BLURRED_TEXTURE, shaderSource).isValid &&
+            gpuDevice.precompilePipeline(OutlineQuads, shaderSource).isValid
+        if (!bothValid()) {
             logger.warn("Render pipelines were lazily compiled before precompile; resetting pipeline cache.")
             gpuDevice.clearPipelineCache()
             precompile()
             // Still invalid after a clean reset: log once. `precompiled` stays latched (set by precompile) so we
             // do not thrash a full recompile every frame — the custom-shader layer is degraded but the client is stable.
-            if (!gpuDevice.precompilePipeline(JCEF.BGRA_BLURRED_TEXTURE, shaderSource).isValid) {
-                logger.error("JCEF render pipeline still failed to compile after cache reset; custom UI shaders unavailable.")
+            if (!bothValid()) {
+                logger.error("Custom render pipelines still failed to compile after cache reset; custom shaders unavailable.")
             }
         }
     }

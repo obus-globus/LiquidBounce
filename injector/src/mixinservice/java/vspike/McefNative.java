@@ -4,10 +4,13 @@ import java.io.File;
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.Enumeration;
 import java.util.Map;
 import java.util.jar.JarEntry;
@@ -33,25 +36,30 @@ final class McefNative {
                 if (jf.getEntry("mcef-native/libcef.so") == null) return; // native not bundled -> download-on-load
                 Path dir = Paths.get(System.getProperty("java.io.tmpdir"), "lb-mcef-native");
                 Path marker = dir.resolve(".extract-complete");
-                // Skip only if a PRIOR extraction fully COMPLETED (marker is written last). Presence of libcef.so alone
-                // is not enough: a partial/interrupted extraction (native present, helper binaries missing) would
-                // otherwise be treated as done and fail MCEF init confusingly. Absent marker -> (re-)extract, overwriting.
-                if (!Files.exists(marker)) {
-                    Files.createDirectories(dir);
-                    for (Enumeration<JarEntry> en = jf.entries(); en.hasMoreElements(); ) {
-                        JarEntry e = en.nextElement();
-                        String n = e.getName();
-                        if (!n.startsWith("mcef-native/")) continue;
-                        String rel = n.substring("mcef-native/".length());
-                        if (rel.isEmpty()) continue;
-                        Path out = dir.resolve(rel);
-                        if (e.isDirectory()) { Files.createDirectories(out); continue; }
-                        if (out.getParent() != null) Files.createDirectories(out.getParent());
-                        try (InputStream in = jf.getInputStream(e)) {
-                            Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
+                Files.createDirectories(dir);
+                // Cross-process exclusive lock: the staging dir is fixed and SHARED, so two clients attaching on the same
+                // host would otherwise both see the marker absent and race on the same ~350 MB tree — one could hand MCEF
+                // a half-overwritten libcef.so. Serialize the whole check-and-extract; the second JVM blocks here, then
+                // sees the completed marker and skips. Skip only if a PRIOR extraction fully COMPLETED (marker written
+                // last) — a partial/interrupted extraction (native present, helpers missing) must re-extract, overwriting.
+                try (FileChannel lockCh = FileChannel.open(dir.resolve(".extract.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                     FileLock lock = lockCh.lock()) {
+                    if (!Files.exists(marker)) {
+                        for (Enumeration<JarEntry> en = jf.entries(); en.hasMoreElements(); ) {
+                            JarEntry e = en.nextElement();
+                            String n = e.getName();
+                            if (!n.startsWith("mcef-native/")) continue;
+                            String rel = n.substring("mcef-native/".length());
+                            if (rel.isEmpty()) continue;
+                            Path out = dir.resolve(rel);
+                            if (e.isDirectory()) { Files.createDirectories(out); continue; }
+                            if (out.getParent() != null) Files.createDirectories(out.getParent());
+                            try (InputStream in = jf.getInputStream(e)) {
+                                Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
+                            }
                         }
+                        Files.write(marker, new byte[0]);   // mark complete only after the whole tree extracted
                     }
-                    Files.write(marker, new byte[0]);   // mark complete only after the whole tree extracted
                 }
                 for (String x : new String[]{"jcef_helper", "chrome-sandbox", "jcef_helper.exe"}) {
                     File f = dir.resolve(x).toFile();

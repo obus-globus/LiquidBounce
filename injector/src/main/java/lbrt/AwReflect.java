@@ -20,7 +20,14 @@ public final class AwReflect {
         if (d.startsWith("[")) { try { return Class.forName(d.replace('/','.'), false, SYS); } catch(Throwable t){ throw re(t); } }
         return cls(d); } }
     private static Field f(String o, String n){ return FC.computeIfAbsent(o+"#"+n, k -> { Class<?> c=cls(o); for(Class<?> t=c;t!=null;t=t.getSuperclass()){ try{ Field f=t.getDeclaredField(n); f.setAccessible(true); return f; }catch(NoSuchFieldException e){} } throw re(new NoSuchFieldException(o+"."+n)); }); }
-    private static Method m(String o, String n, String[] pt, String key){ return MC.computeIfAbsent(key, k -> { Class<?>[] p=types(pt); Class<?> c=cls(o); for(Class<?> t=c;t!=null;t=t.getSuperclass()){ try{ Method m=t.getDeclaredMethod(n,p); m.setAccessible(true); return m; }catch(NoSuchMethodException e){} } throw re(new NoSuchMethodException(o+"."+n)); }); }
+    private static Method find(Class<?> c, String n, Class<?>[] p){ for(Class<?> t=c;t!=null;t=t.getSuperclass()){ try{ Method m=t.getDeclaredMethod(n,p); m.setAccessible(true); return m; }catch(NoSuchMethodException e){} } return null; }
+    private static Method m(String o, String n, String[] pt, String key){ return MC.computeIfAbsent(key, k -> { Class<?> c=cls(o);
+        Method direct=find(c,n,types(pt)); if(direct!=null) return direct;
+        // A static @Invoker of an INSTANCE member is rewritten as a static stub whose FIRST param is the receiver, so the
+        // real method is n(pt[1..]). Resolve that shape too (inv() then supplies args[0] as the receiver) instead of
+        // failing with a confusing NoSuchMethod for a correctly-declared instance invoker.
+        if(pt.length>0){ Method inst=find(c,n,types(Arrays.copyOfRange(pt,1,pt.length))); if(inst!=null && (inst.getModifiers()&Modifier.STATIC)==0) return inst; }
+        throw re(new NoSuchMethodException(o+"."+n)); }); }
     private static Constructor<?> ct(String o, String[] pt, String key){ return CC.computeIfAbsent(key, k -> { try{ Constructor<?> c=cls(o).getDeclaredConstructor(types(pt)); c.setAccessible(true); return c; }catch(Throwable t){ throw re(t); } }); }
     // field GET (target null => static)
     public static Object gO(Object t, String o, String n){ try { return f(o,n).get(t); } catch(Throwable e){ throw re(e); } }
@@ -53,7 +60,13 @@ public final class AwReflect {
     public static void ssS(short v, String o, String n){ try { f(o,n).setShort(null,v); } catch(Throwable e){ throw re(e); } }
     public static void ssC(char v, String o, String n){ try { f(o,n).setChar(null,v); } catch(Throwable e){ throw re(e); } }
     // method invoke (target null => static)
-    public static Object inv(String o, String n, String[] pt, String key, Object t, Object[] a){ try { return m(o,n,pt,key).invoke(t,a); } catch(InvocationTargetException e){ throw re(e.getCause()==null?e:e.getCause()); } catch(Throwable e){ throw re(e); } }
+    public static Object inv(String o, String n, String[] pt, String key, Object t, Object[] a){ try { Method mm=m(o,n,pt,key); Object recv=t; Object[] args=a;
+        if(t==null && (mm.getModifiers()&Modifier.STATIC)==0){ // resolved to an instance method but the stub passed no receiver: its first arg IS the receiver
+            recv=a.length>0?a[0]:null; args=a.length>0?Arrays.copyOfRange(a,1,a.length):a; }
+        return mm.invoke(recv,args); } catch(InvocationTargetException e){ throw re(e.getCause()==null?e:e.getCause()); } catch(Throwable e){ throw re(e); } }
+    /** Fail loud on a null reflective result that bytecode is about to unbox to a primitive (only reachable on a
+     *  descriptor mismatch — a correct invoke of a primitive-returning member never returns null). */
+    public static Object nn(Object v){ if(v==null) throw new IllegalStateException("reflective primitive accessor/invoker returned null — descriptor mismatch"); return v; }
     public static Object newInst(String o, String[] pt, String key, Object[] a){ try { return ct(o,pt,key).newInstance(a); } catch(InvocationTargetException e){ throw re(e.getCause()==null?e:e.getCause()); } catch(Throwable e){ throw re(e); } }
     /** Invoke a sidecar-cached Method with the same throwable semantics as bytecode invocation. Reflection wraps the
      *  target throwable in InvocationTargetException; preserving that wrapper breaks Minecraft's catch/control flow. */
