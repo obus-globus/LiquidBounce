@@ -181,7 +181,17 @@ final class FabricPlatform implements LoaderPlatform {
         int n = 0;
         for (String internal : internalTargets) {
             byte[] pre = getPreMixinClassBytes(internal); if (pre == null) continue;
-            byte[] xOthers = (byte[]) mTransformClassBytes.invoke(transformer, internal.replace('/','.'), internal.replace('/','.'), pre); // LB unvisited -> other mods only
+            byte[] xOthers;
+            try { xOthers = (byte[]) mTransformClassBytes.invoke(transformer, internal.replace('/','.'), internal.replace('/','.'), pre); } // LB unvisited -> other mods only
+            catch (Throwable t) {
+                // Another mod's mixin whose injection point diverges on this already-loaded target throws here. Default
+                // is FAIL-FAST (propagate -> abort the inject). With tolerateBaselineFailures=true, skip just this target
+                // (its transform() then falls back to originalO) so one bad mod mixin doesn't kill the whole attach.
+                if (!FullInjectAgent.tolerateBaselineFailures) { if (t instanceof Error e) throw e; if (t instanceof Exception e) throw e; throw new RuntimeException(t); }
+                Throwable c = t instanceof java.lang.reflect.InvocationTargetException && t.getCause() != null ? t.getCause() : t;
+                InjectionLogger.warn("baseline capture skipped (tolerated) for "+internal+" -> "+c.getClass().getSimpleName()+": "+String.valueOf(c.getMessage()).split("\n")[0]);
+                continue;
+            }
             baseline.put(internal, xOthers == null ? pre : xOthers); n++;
         }
         InjectionLogger.info("captured "+n+" non-LB mod baselines (X_others)");

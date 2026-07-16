@@ -44,6 +44,7 @@ public final class InjectorUi extends JFrame {
     private final JTextField agentField = new JTextField();
     private final JTextField dataDirField = new JTextField();
     private final JComboBox<String> dataModeCombo = new JComboBox<>(new String[]{"Client game directory", "Working directory", "Custom folder…"});
+    private final JCheckBox tolerateFailuresCheck = new JCheckBox("Tolerate other-mod mixin failures (skip instead of aborting)");
     private final JTextArea logArea = new JTextArea();
     private final JButton refreshButton = new JButton("Refresh");
     private final JButton injectButton = new JButton("Inject LiquidBounce");
@@ -117,9 +118,13 @@ public final class InjectorUi extends JFrame {
         agentLabel.setPreferredSize(labelSize);
         dataLabel.setPreferredSize(labelSize);
 
-        JPanel form = new JPanel(new GridLayout(2, 1, 0, 6));
+        tolerateFailuresCheck.setToolTipText("<html>Modded loaders only. When another mod's mixin fails to apply to an already-loaded class during injection,<br>"
+                + "the default (off) aborts the whole injection. Enable this to skip just that class and continue &mdash; useful in<br>"
+                + "heavy modpacks where one incompatible mod would otherwise block LiquidBounce entirely.</html>");
+        JPanel form = new JPanel(new GridLayout(3, 1, 0, 6));
         form.add(agentPanel);
         form.add(dataDirPanel);
+        form.add(tolerateFailuresCheck);
         center.add(form, BorderLayout.SOUTH);
         content.add(center, BorderLayout.CENTER);
 
@@ -256,6 +261,7 @@ public final class InjectorUi extends JFrame {
         File finalInjectionLog = injectionLog;
         final int dataMode = dataModeCombo.getSelectedIndex();   // 0=game dir, 1=working dir, 2=custom
         final String dataDir = dataDirField.getText().trim();    // captured on the EDT
+        final boolean tolerateFailures = tolerateFailuresCheck.isSelected();
         setBusy(true, uninject ? "Attaching (uninject) ..." : "Attaching ...", 15);
         new SwingWorker<Void, LogUpdate>() {
             @Override protected Void doInBackground() throws Exception {
@@ -270,6 +276,10 @@ public final class InjectorUi extends JFrame {
                     if (gameDir != null) {
                         if (args.length() > 0) args.append(AGENT_ARG_SEP);
                         args.append("gameDir=").append(gameDir);
+                    }
+                    if (tolerateFailures) {   // modded loaders: skip an other-mod target that fails to transform instead of aborting
+                        if (args.length() > 0) args.append(AGENT_ARG_SEP);
+                        args.append("tolerateBaselineFailures=true");
                     }
                 }
                 String agentArgs = args.toString();

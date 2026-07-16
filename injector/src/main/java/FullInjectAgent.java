@@ -18,6 +18,7 @@ public class FullInjectAgent {
     static Instrumentation INST;
     static volatile java.lang.instrument.ClassFileTransformer CFT;                 // installed on-load transformer; kept so uninject can remove it
     static volatile boolean everInjected;                                         // true once injected; a second inject in the same JVM (even after uninject) is refused — LB can't be re-staged live. volatile: successive attaches may land on different attach-listener threads.
+    static boolean tolerateBaselineFailures;                                      // agent arg tolerateBaselineFailures=true: on modded loaders, skip an other-mod target whose baseline transform throws instead of aborting the whole inject. Default OFF (fail-fast). Set once in agentmain before prepareBaselines, read on the same thread.
     static final Set<String> preLoaded = ConcurrentHashMap.newKeySet();            // MC classes loaded at attach (can't be AW-widened)
     static final Map<String,Boolean> npField = new ConcurrentHashMap<>();          // owner#name -> non-public?
     static final Map<String,Boolean> npMethod = new ConcurrentHashMap<>();         // owner#name desc -> non-public?
@@ -45,6 +46,7 @@ public class FullInjectAgent {
         SYS = PLATFORM.targetLoader();
         lbrt.Platform.LOADER = SYS;
         applyDataDir(a);
+        tolerateBaselineFailures = "true".equalsIgnoreCase(InjectionLogger.argValue(a, "tolerateBaselineFailures"));
         verifyAsmRuntime();
         for (Class<?> c : inst.getAllLoadedClasses()) preLoaded.add(c.getName().replace('.','/'));   // snapshot BEFORE we load anything
         inst.redefineModule(Object.class.getModule(), Set.of(), Map.of(), Map.of("java.lang", Set.of(FullInjectAgent.class.getModule())), Set.of(), Map.of());
