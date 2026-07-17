@@ -137,8 +137,16 @@ public class FullInjectAgent {
                 Conv cv = convMap.get(n);
                 if (cv!=null) {
                     byte[] t;
-                    if (c==null) t = cv.target;
-                    else { long s=System.nanoTime(); t = RetransformConverter.rebase(cv.target, b); tRebase += System.nanoTime()-s; nRebase++; }
+                    // Rebase the converted target' onto the ACTUAL bytes being (re)defined — for BOTH already-loaded
+                    // (c!=null) and future-loaded (c==null) classes. cv.target was built at inject time from a raw/snapshot
+                    // baseline; a loader that transforms classes on load (LabyMod's LaunchWrapper Proxy adds interfaces/
+                    // methods to net.minecraft classes, e.g. CommandSuggestions -> CommandSuggestionsAccessor) makes `b`
+                    // richer than that baseline. Returning the static cv.target for c==null would STRIP those additions and
+                    // crash the loader's own mixins (ClassCastException to its accessor). Rebasing onto `b` preserves them;
+                    // if it can't reconcile, the outer catch returns null -> the JVM defines the original `b` (loader hooks
+                    // intact, LB's hook on that one class inert). On vanilla/Fabric/NeoForge `b` matches cv's baseline, so
+                    // this is the same result as before.
+                    { long s=System.nanoTime(); t = RetransformConverter.rebase(cv.target, b); tRebase += System.nanoTime()-s; nRebase++; }
                     if(connect)t=JoinGateRewriter.rewrite(n,t);
                     if (c!=null) { long s=System.nanoTime(); boolean ok=LateAttachVerifier.verifyRetransform(n, b, t); tVerify += System.nanoTime()-s; if(!ok) return null; }
                     if(!cv.define(p)){
@@ -488,6 +496,12 @@ public class FullInjectAgent {
     static LoaderPlatform detectPlatform(Instrumentation inst) throws Exception {
         if (loaderPresent(inst,"net.fabricmc.loader.impl.launch.knot.KnotClassLoader")) { InjectionLogger.info("detected Fabric (Knot) loader"); return new FabricPlatform(); }
         if (loaderPresent(inst,"net.neoforged.fml.classloading.transformation.TransformingClassLoader")) { InjectionLogger.info("detected NeoForge (FML) loader"); return new NeoForgePlatform(inst); }
+        // LabyMod 4: legacy LaunchWrapper (net.minecraft.launchwrapper.LaunchClassLoader) + LabyMod's own Mixin host
+        // service. Checked before vanilla because bare vanilla has no LaunchClassLoader. Both markers required so a
+        // plain LegacyLauncher (no LabyMod Mixin engine) still falls through to vanilla.
+        if (loaderPresent(inst,"net.minecraft.launchwrapper.LaunchClassLoader")
+                && loaderPresent(inst,"net.labymod.core.loader.vanilla.launchwrapper.mixin.LabyModMixinService")) {
+            InjectionLogger.info("detected LabyMod (LaunchWrapper) loader"); return new LabyModPlatform(inst); }
         InjectionLogger.info("detected vanilla (system) loader"); return new VanillaPlatform();
     }
     static boolean loaderPresent(Instrumentation inst, String dotted){ for (Class<?> c : inst.getAllLoadedClasses()) if (c.getName().equals(dotted)) return true; return false; }
