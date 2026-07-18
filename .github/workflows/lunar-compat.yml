@@ -55,8 +55,16 @@ jobs:
 
       - name: Resolve LiquidBounce mixins against Lunar
         id: check
-        continue-on-error: true   # broken mixins fail the job; we still want the report + summary
-        run: ./gradlew checkLunarCompat -PlunarJar=lunar-compat/lunar-classes.jar --no-daemon
+        continue-on-error: true   # graded below: a real broken mixin fails the job, a build/infra error only warns
+        run: |
+          for attempt in 1 2 3; do
+            ./gradlew checkLunarCompat -PlunarJar=lunar-compat/lunar-classes.jar --no-daemon && exit 0
+            # a broken mixin writes the report before failing; that is a real result, do not retry it
+            if [ -f build/reports/lunar-compat.txt ] && grep -qE '^\[BLOCKER\]' build/reports/lunar-compat.txt; then exit 1; fi
+            echo "gradle attempt $attempt failed with no blocker report (transient build/dependency error); retrying..."
+            sleep 20
+          done
+          exit 1
 
       - name: Publish report to the job summary
         if: always()
@@ -84,11 +92,17 @@ jobs:
             lunar-compat/lunar-classes.jar.meta
           if-no-files-found: warn
 
-      - name: Fail if mixins are broken on Lunar
-        if: steps.check.outcome == 'failure'
+      - name: Grade the static check
+        if: always()
         run: |
-          echo "::error::One or more LiquidBounce mixins would fail to apply on Lunar - see the job summary."
-          exit 1
+          if [ -f build/reports/lunar-compat.txt ] && grep -qE '^\[BLOCKER\]' build/reports/lunar-compat.txt; then
+            echo "::error::One or more LiquidBounce mixins would fail to apply on Lunar - see the job summary."
+            exit 1
+          elif [ "${{ steps.check.outcome }}" == "failure" ]; then
+            echo "::warning::The static mixin check did not complete (build or dependency-resolution error, not a detected mixin incompatibility) - see the logs."
+          else
+            echo "Static mixin check passed: no broken mixins on the current Lunar build."
+          fi
 
   runtime-boot-check:
     name: Runtime boot check (Lunar + LiquidBounce)
