@@ -383,6 +383,26 @@ tasks.jar {
     }
 }
 
+// Relocate the bundled okhttp/okio out of the shared `okhttp3`/`okio` packages into a private prefix,
+// so a host client that ships its own copy on a common classloader can't shadow LiquidBounce's. This
+// is required to run under Lunar Client, which bundles a stripped `okhttp3` (no Kotlin
+// `Headers.Companion`) that otherwise wins over LiquidBounce's okhttp 5 and throws NoSuchFieldError
+// on first use, tripping the fatal error handler. Harmless on normal Fabric/NeoForge. Runs on the
+// assembled jar and rewrites its nested jar-in-jar entries too.
+val relocateJij = tasks.register<RelocateJarTask>("relocateJij") {
+    jar.set(
+        layout.buildDirectory.file(
+            providers.gradleProperty("archives_base_name")
+                .zip(providers.gradleProperty("mod_version")) { name, version -> "libs/$name-$version.jar" }
+        )
+    )
+    packages.set(listOf("okhttp3", "okio"))
+    prefixString = "net/ccbluex/liquidbounce/libs/"
+}
+// LiquidBounce Nextgen ships mojmap-named, so Loom adds no `remapJar`; the final artifact (with the
+// jar-in-jar nested libs) is the `jar` task's output. Relocate right after it.
+tasks.named("jar") { finalizedBy(relocateJij) }
+
 tasks.register<Copy>("copyZipInclude") {
     from("zip_include/")
     into("build/libs/zip")
