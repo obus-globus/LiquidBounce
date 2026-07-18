@@ -1,0 +1,147 @@
+# LiquidBounce <-> Lunar Client compatibility, checked two ways, both fully auto-provisioned and
+# resistant to Lunar updates (the Minecraft version is read from LiquidBounce's own version catalog and
+# the Lunar build is always the current public one, so nothing here needs editing when Lunar updates):
+#
+#   static-mixin-check  - no gameplay. Fetches Lunar's current build, bakes its Minecraft classes, and
+#                         statically resolves every LiquidBounce mixin's target + injector selectors
+#                         against them. Catches "a mixin silently stopped applying after a Lunar update".
+#   runtime-boot-check  - actually boots Lunar with LiquidBounce loaded and inspects the init log. Catches
+#                         what the static check can't: classpath/library shadowing, shader/pipeline
+#                         failures, linkage errors, LiquidBounce's own fatal error handler firing.
+#
+# Only Lunar's public `master` branch is reachable without a Lunar account. Leave mc_version blank to use
+# whatever Minecraft version LiquidBounce currently targets.
+name: Lunar compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      mc_version:
+        description: 'Minecraft version (blank = auto-detect from gradle/libs.versions.toml)'
+        required: false
+        default: ''
+      lunar_branch:
+        description: 'Lunar branch (only "master" is public; beta/staging need a Lunar account)'
+        required: false
+        default: 'master'
+  schedule:
+    - cron: '0 6 * * *'   # daily - catch Lunar updates that break LiquidBounce before users do
+
+permissions:
+  contents: read
+
+env:
+  MC_VERSION: ${{ github.event.inputs.mc_version }}      # blank -> scripts auto-detect from the repo
+  LUNAR_BRANCH: ${{ github.event.inputs.lunar_branch || 'master' }}
+
+jobs:
+  static-mixin-check:
+    name: Static mixin check (no gameplay)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Fetch + bake Lunar's Minecraft classes
+        run: bash lunar-compat/scripts/fetch-and-bake.sh "$MC_VERSION" lunar-compat/lunar-classes.jar
+
+      - name: Resolve LiquidBounce mixins against Lunar
+        id: check
+        continue-on-error: true   # broken mixins fail the job; we still want the report + summary
+        run: ./gradlew checkLunarCompat -PlunarJar=lunar-compat/lunar-classes.jar --no-daemon
+
+      - name: Publish report to the job summary
+        if: always()
+        run: |
+          {
+            echo "## Static mixin check"
+            echo
+            if [ -f lunar-compat/lunar-classes.jar.meta ]; then
+              echo '**Tested Lunar build:**'; echo '```'; cat lunar-compat/lunar-classes.jar.meta; echo '```'; echo
+            fi
+            if [ -f build/reports/lunar-compat.txt ]; then
+              echo '```'; cat build/reports/lunar-compat.txt; echo '```'
+            else
+              echo 'No report produced - the fetch/bake step likely failed (see logs).'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunar-static-report
+          path: |
+            build/reports/lunar-compat.txt
+            lunar-compat/lunar-classes.jar.meta
+          if-no-files-found: warn
+
+      - name: Fail if mixins are broken on Lunar
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "::error::One or more LiquidBounce mixins would fail to apply on Lunar - see the job summary."
+          exit 1
+
+  runtime-boot-check:
+    name: Runtime boot check (Lunar + LiquidBounce)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build LiquidBounce (okhttp relocated for Lunar)
+        run: ./gradlew jar --no-daemon
+
+      - name: Boot Lunar with LiquidBounce and inspect the init log
+        id: runtime
+        run: |
+          set +e
+          bash lunar-compat/scripts/run-liquidbounce.sh "$MC_VERSION"
+          echo "code=$?" >> "$GITHUB_OUTPUT"   # 0 ok | 1 real incompat | 3 infra (Lunar didn't boot)
+
+      - name: Publish report to the job summary
+        if: always()
+        run: |
+          {
+            echo "## Runtime boot check"
+            echo
+            if [ -f build/reports/lunar-runtime-compat.txt ]; then
+              echo '```'; cat build/reports/lunar-runtime-compat.txt; echo '```'
+            else
+              echo 'No report produced - the build or boot step likely failed (see logs).'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunar-runtime-report
+          path: build/reports/lunar-runtime-compat.txt
+          if-no-files-found: warn
+
+      - name: Note if Lunar could not boot on the runner (infra, not a LiquidBounce problem)
+        if: steps.runtime.outputs.code == '3'
+        run: echo "::warning::Lunar itself did not boot on the runner (environment/provisioning) - not counted as a LiquidBounce incompatibility. See the job summary."
+
+      - name: Fail if LiquidBounce does not run cleanly on Lunar
+        if: steps.runtime.outputs.code == '1'
+        run: |
+          echo "::error::LiquidBounce did not run cleanly on Lunar at runtime - see the job summary."
+          exit 1
