@@ -8,24 +8,31 @@
 # is fine, the bake is already saved). The dotted-name entries in bake.zip are rewritten to a normal <internal>.class
 # jar.
 #
+# The launch API always serves the LATEST Lunar build for a given (MC version, branch) — there is no way to pin a
+# historical Lunar build, which is the right default for "does it work on what users run right now". The exact build
+# is recorded (Genesis logs a commit hash) into <OUTPUT_JAR>.meta so each report says what it tested. Only the public
+# `master` (release) branch is reachable without a Lunar account; `beta`/`staging` return NO_PERMISSION_PRIVATE_BRANCH.
+#
 # Usage: fetch-and-bake.sh [MC_VERSION] [OUTPUT_JAR]
-#   MC_VERSION  default 26.2
-#   OUTPUT_JAR  default lunar-compat/lunar-classes.jar
+#   MC_VERSION  default 26.2   (should match the Minecraft version LiquidBounce targets)
+#   OUTPUT_JAR  default lunar-compat/lunar-classes.jar   (+ a sibling .meta with the tested Lunar build info)
+#   env LUNAR_BRANCH  default master  (beta/staging need Lunar account access)
 # Requires: curl, python3, a JRE matching the MC version's Java level (26.2 -> Java 25), Xvfb (headless), unzip.
 set -euo pipefail
 
 MC_VERSION="${1:-26.2}"
 OUT_JAR="${2:-lunar-compat/lunar-classes.jar}"
+BRANCH="${LUNAR_BRANCH:-master}"
 WORK="${LUNAR_WORK:-$(mktemp -d /tmp/lunar-bake.XXXXXX)}"
 JAVA_BIN="${JAVA_BIN:-java}"
 API="https://api.lunarclientprod.com/launcher/launch"
 LAUNCHER_VER="$(curl -fsSL --max-time 20 https://launcherupdates.lunarclientcdn.com/latest.yml | head -1 | sed 's/version: *//;s/[^0-9.].*//' || echo 3.4.9)"
-echo "[lunar] MC=$MC_VERSION launcher=$LAUNCHER_VER work=$WORK"
+echo "[lunar] MC=$MC_VERSION branch=$BRANCH launcher=$LAUNCHER_VER work=$WORK"
 mkdir -p "$WORK/jars" "$WORK/natives" "$WORK/run" "$WORK/cache"
 
 HWID="$(cat /proc/sys/kernel/random/uuid)"; IID="$(cat /proc/sys/kernel/random/uuid)"; OSREL="$(uname -r)"
 curl -fsSL --max-time 60 -X POST "$API" -H 'Content-Type: application/json' -H "User-Agent: Lunar Client Launcher v$LAUNCHER_VER" \
-  -d "{\"os\":\"linux\",\"os_release\":\"$OSREL\",\"arch\":\"x64\",\"hwid\":\"$HWID\",\"hwid_private\":\"$HWID\",\"installation_id\":\"$IID\",\"launcher_version\":\"$LAUNCHER_VER\",\"version\":\"$MC_VERSION\",\"branch\":\"master\",\"launch_type\":\"OFFLINE\",\"module\":\"lunar\"}" \
+  -d "{\"os\":\"linux\",\"os_release\":\"$OSREL\",\"arch\":\"x64\",\"hwid\":\"$HWID\",\"hwid_private\":\"$HWID\",\"installation_id\":\"$IID\",\"launcher_version\":\"$LAUNCHER_VER\",\"version\":\"$MC_VERSION\",\"branch\":\"$BRANCH\",\"launch_type\":\"OFFLINE\",\"module\":\"lunar\"}" \
   -o "$WORK/resp.json"
 
 python3 - "$WORK" <<'PY'
@@ -78,4 +85,16 @@ for e in zi.namelist():
         zo.writestr(e.replace('.','/')+'.class', data); n+=1
 zo.close(); print(f"[lunar] wrote {out}: {n} classes")
 PY
-echo "[lunar] done. Reference jar: $OUT_JAR"
+
+# Record exactly which Lunar build was tested (Genesis logs branch + commit hash) so the report is reproducible-ish.
+LUNAR_COMMIT="$(grep -aoE 'Commit Hash: [0-9a-f]+' "$WORK/bake.log" | head -1 | awk '{print $3}' || true)"
+LUNAR_LOGBRANCH="$(grep -aoE 'Branch: [A-Za-z0-9._/-]+' "$WORK/bake.log" | head -1 | awk '{print $2}' || true)"
+{
+  echo "mc_version=$MC_VERSION"
+  echo "branch=${LUNAR_LOGBRANCH:-$BRANCH}"
+  echo "lunar_commit=${LUNAR_COMMIT:-unknown}"
+  echo "launcher_version=$LAUNCHER_VER"
+  echo "fetched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "${OUT_JAR}.meta"
+echo "[lunar] tested build: MC $MC_VERSION, branch ${LUNAR_LOGBRANCH:-$BRANCH}, Lunar commit ${LUNAR_COMMIT:-unknown}"
+echo "[lunar] done. Reference jar: $OUT_JAR  (build info: ${OUT_JAR}.meta)"

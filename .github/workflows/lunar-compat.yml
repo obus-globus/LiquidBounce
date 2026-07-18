@@ -3,15 +3,31 @@
 # mixin injection points can silently break. This job fetches Lunar's current build, bakes its runtime classes, and
 # resolves every LiquidBounce mixin selector against them — turning "users complain it doesn't work on Lunar" into a
 # proactive, per-run report of exactly which mixins fail.
+#
+# The scheduled run always tests the LATEST Lunar release (master) for the default MC version; use "Run workflow" to
+# point it at a different MC version. Only Lunar's public `master` branch is reachable without a Lunar account.
 name: Lunar compatibility
 
 on:
   workflow_dispatch:
+    inputs:
+      mc_version:
+        description: 'Minecraft version to test against Lunar (should match what LiquidBounce targets)'
+        required: false
+        default: '26.2'
+      lunar_branch:
+        description: 'Lunar branch (only "master" is public; beta/staging need a Lunar account)'
+        required: false
+        default: 'master'
   schedule:
     - cron: '0 6 * * *'   # daily — catch Lunar updates that break mixins before users do
 
 permissions:
   contents: read
+
+env:
+  MC_VERSION: ${{ github.event.inputs.mc_version || '26.2' }}
+  LUNAR_BRANCH: ${{ github.event.inputs.lunar_branch || 'master' }}
 
 jobs:
   lunar-compat:
@@ -31,7 +47,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Fetch + bake Lunar's Minecraft classes
-        run: bash lunar-compat/scripts/fetch-and-bake.sh 26.2 lunar-compat/lunar-classes.jar
+        run: bash lunar-compat/scripts/fetch-and-bake.sh "$MC_VERSION" lunar-compat/lunar-classes.jar
 
       - name: Check LiquidBounce ⇄ Lunar mixin compatibility
         id: check
@@ -42,7 +58,14 @@ jobs:
         if: always()
         run: |
           {
-            echo '## LiquidBounce ⇄ Lunar Client 26.2 compatibility'
+            echo "## LiquidBounce ⇄ Lunar Client $MC_VERSION compatibility"
+            echo
+            if [ -f lunar-compat/lunar-classes.jar.meta ]; then
+              echo '**Tested Lunar build:**'
+              echo '```'
+              cat lunar-compat/lunar-classes.jar.meta
+              echo '```'
+            fi
             echo
             if [ -f build/reports/lunar-compat.txt ]; then
               echo '```'
@@ -58,11 +81,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lunar-compat-report
-          path: build/reports/lunar-compat.txt
+          path: |
+            build/reports/lunar-compat.txt
+            lunar-compat/lunar-classes.jar.meta
           if-no-files-found: warn
 
       - name: Fail if mixins are broken on Lunar
         if: steps.check.outcome == 'failure'
         run: |
-          echo "::error::One or more LiquidBounce mixins would fail to apply on Lunar Client 26.2 — see the job summary."
+          echo "::error::One or more LiquidBounce mixins would fail to apply on Lunar Client $MC_VERSION — see the job summary."
           exit 1

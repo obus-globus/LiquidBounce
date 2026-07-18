@@ -23,6 +23,20 @@ This tooling turns the reactive "users report it's broken → we fix a mixin" lo
 3. The **`Lunar compatibility` GitHub Action** (`.github/workflows/lunar-compat.yml`) runs both daily and reports the
    failing mixins to the job summary, so a Lunar update that breaks LiquidBounce is caught before users notice.
 
+## Which Lunar version is tested?
+
+The launch API always serves the **latest** Lunar build for a given `(MC version, branch)` — you can't pin a
+historical Lunar build (which is the right default: you want "does it work on what users run *now*"). What you can
+pick:
+
+- **MC version** — first arg to the script / the `mc_version` workflow input (default `26.2`; match LiquidBounce's
+  target version).
+- **Branch** — `LUNAR_BRANCH` env / `lunar_branch` workflow input. Only `master` (release) is reachable publicly;
+  `beta`/`staging` return `NO_PERMISSION_PRIVATE_BRANCH` (need a Lunar account).
+
+Every run records the exact tested build (Lunar's Genesis commit hash + launcher version + timestamp) to
+`<output-jar>.meta`, and the GitHub Action prints it in the job summary, so a report always says *what* it ran against.
+
 ## Run locally
 
 ```bash
