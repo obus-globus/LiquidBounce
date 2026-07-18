@@ -101,10 +101,27 @@ final class Jattach {
         else if (os.contains("mac") || os.contains("darwin")) { resource = "jattach-macos"; outName = "jattach"; }
         else if (arch.contains("aarch64") || arch.contains("arm64")) { resource = "jattach-linux-arm64"; outName = "jattach"; }
         else { resource = "jattach-linux-x64"; outName = "jattach"; }
-        // Fresh private temp dir with a random name (owner-only 0700 on POSIX; on Windows it inherits the %TEMP% ACL,
-        // which is per-user by default). Registered for deletion on JVM exit so we don't orphan a ~1 MB executable dir
-        // each run. The SHA-256 check below is the actual integrity guarantee (independent of the dir ACL).
-        Path dir = Files.createTempDirectory("lb-jattach-");
+        // Prefer java.io.tmpdir; if it is mounted noexec (or an ACL blocks exec), the exec PROBE below fails even though
+        // the exec bit was set, so fall back to a private dir under user.home. File.canExecute() only reads the bit and
+        // misses a noexec mount, so we actually run the binary once (no args -> prints usage, exits) to be sure.
+        Path out = stage(Files.createTempDirectory("lb-jattach-"), resource, outName);
+        if (!execWorks(out)) {
+            Path home = Path.of(System.getProperty("user.home", "."));
+            Path alt = stage(Files.createTempDirectory(home, ".lb-jattach-"), resource, outName);
+            if (!execWorks(alt))
+                throw new IOException("the extracted jattach binary is not executable — java.io.tmpdir ("
+                    + System.getProperty("java.io.tmpdir") + ") and the " + home + " fallback both reject execution "
+                    + "(e.g. noexec mounts or a restrictive ACL). Use a JRE/JDK that ships the jdk.attach module so jattach isn't needed.");
+            out = alt;
+        }
+        cachedBinary = out.toFile();
+        return cachedBinary;
+    }
+
+    /** Extract + verify the vendored binary into {@code dir} (random name, owner-only 0700 on POSIX / per-user %TEMP%
+     *  on Windows; SHA-256 is the real integrity guarantee). Registered for deletion on JVM exit. Throws on a
+     *  copy/verify failure (a tamper is fatal, not a fall-back-worthy noexec condition). */
+    private static Path stage(Path dir, String resource, String outName) throws IOException {
         dir.toFile().deleteOnExit();
         Path out = dir.resolve(outName);
         try (InputStream in = Jattach.class.getResourceAsStream("/jattach/" + resource)) {
@@ -113,8 +130,24 @@ final class Jattach {
         }
         verifySha256(out, SHA256.get(resource), resource);   // fail closed on a tampered/unknown binary before making it executable
         out.toFile().deleteOnExit();
-        out.toFile().setExecutable(true, true);
-        cachedBinary = out.toFile();
-        return cachedBinary;
+        if (!out.toFile().setExecutable(true, true))          // don't silently ignore: a false here means the probe below will fail -> fallback
+            System.err.println("[jattach] could not set the exec bit on " + out + " (restrictive FS/ACL); verifying by probing");
+        return out;
+    }
+
+    /** Actually run the binary (no args -> usage + fast exit) to confirm the OS permits execution — catches a noexec
+     *  mount / ACL that {@link java.io.File#canExecute()} (bit-only) misses. */
+    private static boolean execWorks(Path bin) {
+        try {
+            Process p = new ProcessBuilder(bin.toString()).redirectErrorStream(true).start();
+            p.getInputStream().readAllBytes();   // drain the usage output so the child doesn't block
+            p.waitFor();
+            return true;
+        } catch (IOException e) {
+            return false;                         // EACCES on a noexec mount / unset exec bit
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return true;                          // it did start; interruption isn't an exec failure
+        }
     }
 }

@@ -191,7 +191,10 @@ public final class LateAttachVerifier {
     public static synchronized Path writeReport() {
         try {
             String override=System.getProperty("lb.agent.verificationReport");
-            Path out=override==null||override.isBlank()?Path.of(System.getProperty("java.io.tmpdir"),"liquidbounce-lateattach-verification-"+ProcessHandle.current().pid()+".json"):Path.of(override);
+            // Default: a random-named temp file (createTempFile = O_EXCL + owner-only), not a fixed
+            // /tmp/liquidbounce-lateattach-verification-<pid>.json a local attacker could pre-plant a symlink at (the
+            // path is printed to the injection log, so a fixed name buys nothing). An explicit override is the caller's.
+            Path out=override==null||override.isBlank()?Files.createTempFile("liquidbounce-lateattach-verification-"+ProcessHandle.current().pid()+"-",".json"):Path.of(override);
             Path tmp=out.resolveSibling(out.getFileName()+".tmp");
             StringBuilder j=new StringBuilder("{\"schemaVersion\":1,\"status\":\"").append(hasErrors()?"error":"ok").append("\",\"summary\":{\"errors\":").append(errorCount()).append(",\"issues\":").append(ISSUES.size()).append("},\"issues\":[");
             for(int i=0;i<ISSUES.size();i++){if(i>0)j.append(',');Issue x=ISSUES.get(i);j.append('{').append(json("severity",x.severity)).append(',').append(json("code",x.code)).append(',').append(json("class",x.owner)).append(',').append(json("artifact",x.artifact)).append(',').append(json("method",x.method)).append(',').append(json("message",x.message)).append('}');}

@@ -442,7 +442,10 @@ dependencies { injectorMixinExtras("io.github.llamalad7:mixinextras-common:0.5.4
 
 // LB payload jar: loader-neutral LB classes/resources + the vanilla Platform impl (its Platform service wins).
 tasks.register<Jar>("lbClassesForInjector") {
-    dependsOn("classes", "processResources", "injectorLbVanillaClasses", ":neoforge:classes", ":neoforge:processResources")
+    // Also run the divergence check: this bundles the NeoForge companion mixins into the agent, and building the agent
+    // in isolation (injectorAgentJar without a full `build`) would otherwise ship un-validated companions and skip the
+    // exact static check that catches a load-time InvalidInjectionException on a NeoForge bump.
+    dependsOn("classes", "processResources", "injectorLbVanillaClasses", ":neoforge:classes", ":neoforge:processResources", ":neoforge:checkMixinDivergence")
     archiveFileName.set("liquidbounce.jar")
     destinationDirectory.set(layout.buildDirectory.dir("injector/tmp"))
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE

@@ -249,9 +249,11 @@ public final class InjectorUi extends JFrame {
         tailingInjectionLog = false;
         File injectionLog;
         try {
-            injectionLog = new File(System.getProperty("java.io.tmpdir"), "liquidbounce-" + verb + "-" + process.pid + ".log");
-            Files.writeString(injectionLog.toPath(), "", StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            // Random-named (createTempFile: O_EXCL + owner-only), not a fixed /tmp/liquidbounce-<verb>-<pid>.log an
+            // attacker on a shared host could pre-plant a symlink at and clobber via the truncating open. The tool holds
+            // the path and passes it to the agent, so predictability buys nothing.
+            injectionLog = Files.createTempFile("liquidbounce-" + verb + "-" + process.pid + "-", ".log").toFile();
+            injectionLog.deleteOnExit();
             startInjectionLogTail(injectionLog, uninject);
             appendLog("Dedicated " + verb + " log: " + injectionLog.getAbsolutePath());
         } catch (Exception logFailure) {

@@ -31,6 +31,7 @@ public final class InjectionLogger {
     public static synchronized void configure(String agentArgs) {
         String logFile = argValue(agentArgs, "logFile");
         if (logFile == null) return;
+        if (fileOutput != null) { try { fileOutput.close(); } catch (Exception ignore) {} fileOutput = null; }   // close the prior handle first: configure() runs on every agentmain (incl. re-inject refusal / uninject no-op), so reopening without closing leaks an FD + writer per attach
         try {
             Path path = Path.of(logFile).toAbsolutePath();
             Path parent = path.getParent();

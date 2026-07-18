@@ -68,12 +68,5 @@ public final class AwReflect {
      *  descriptor mismatch — a correct invoke of a primitive-returning member never returns null). */
     public static Object nn(Object v){ if(v==null) throw new IllegalStateException("reflective primitive accessor/invoker returned null — descriptor mismatch"); return v; }
     public static Object newInst(String o, String[] pt, String key, Object[] a){ try { return ct(o,pt,key).newInstance(a); } catch(InvocationTargetException e){ throw re(e.getCause()==null?e:e.getCause()); } catch(Throwable e){ throw re(e); } }
-    /** Invoke a sidecar-cached Method with the same throwable semantics as bytecode invocation. Reflection wraps the
-     *  target throwable in InvocationTargetException; preserving that wrapper breaks Minecraft's catch/control flow. */
-    public static Object invokeResolved(Method method,Object target,Object[] args,String label){ try{return method.invoke(target,args);}
-        catch(InvocationTargetException e){Throwable cause=e.getCause()==null?e:e.getCause();log(label,cause);throw sneaky(cause);}
-        catch(Throwable e){log(label,e);throw sneaky(e);} }
-    private static void log(String label,Throwable t){if(label==null||t.getClass().getName().equals("net.minecraft.server.RunningOnDifferentThreadException"))return;InjectionLogger.error("REFLECT-INVOKE-FAIL "+label,t);}
-    @SuppressWarnings("unchecked") private static <T extends Throwable> RuntimeException sneaky(Throwable t)throws T{throw (T)t;}
     private static RuntimeException re(Throwable e){ return e instanceof RuntimeException r ? r : new RuntimeException(e); }
 }
