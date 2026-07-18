@@ -116,9 +116,11 @@ abstract class LunarCompatCheckTask : DefaultTask() {
             file.inputStream().use { stream ->
                 ClassNode().also { ClassReader(stream).accept(it, ClassReader.SKIP_FRAMES) }
             }
-        }.map(::parseMixin).filter { it.injectors.isNotEmpty() }
+        }.map(::parseMixin)
 
-        // Only load the target classes actually referenced by a mixin, for speed.
+        // Load the target classes referenced by any mixin. ALL mixins are checked, not only injector-bearing
+        // ones: an @Overwrite/@Shadow/accessor mixin whose target class Lunar removed is a hard load failure
+        // too, caught by the target-class existence check in checkMixin.
         val referenced = mixins.flatMap { it.targets }.toSet()
         val targets = loadTargets(referenced)
 
@@ -129,11 +131,19 @@ abstract class LunarCompatCheckTask : DefaultTask() {
 
         // Coverage - so a partial bake (few classes) can't read as "0 broken, passed": count how many of the
         // net/minecraft target classes the mixins reference actually resolved against Lunar's baked jar.
+        val injectorMixins = mixins.count { it.injectors.isNotEmpty() }
         val mcTargets = referenced.filter { it.startsWith("net/minecraft/") }
         val mcResolved = mcTargets.count { targets[it] != null }
-        val coverage = "Checked ${mixins.size} injector-bearing mixin(s); " +
+        val coverage = "Checked ${mixins.size} mixin(s) ($injectorMixins with injectors); " +
             "net.minecraft targets resolved $mcResolved/${mcTargets.size} against Lunar's bake."
         if (mcTargets.isNotEmpty() && mcResolved == 0) {
+            // Write the report so the CI grade can tell this deterministic bad-bake abort from a transient
+            // build error, and so it is not pointlessly retried.
+            report.orNull?.asFile?.let {
+                it.parentFile?.mkdirs()
+                it.writeText("[ABORTED] $coverage\nEvery net.minecraft target failed to resolve against Lunar's " +
+                    "bake (empty/partial/failed bake); the check would pass vacuously, so it was aborted.\n")
+            }
             throw GradleException(
                 "$coverage\nEvery net.minecraft target failed to resolve - Lunar's baked classes look empty or " +
                     "wrong (a partial/failed bake), so this check would pass vacuously. Aborting.",
@@ -197,14 +207,18 @@ abstract class LunarCompatCheckTask : DefaultTask() {
             "Lcom/llamalad7/mixinextras/injector/wrapmethod/WrapMethod;" to "WrapMethod",
         )
 
-        // Injectors whose leading params must be a PREFIX of the target args.
+        // `@Inject` captures target args as a PREFIX and must capture ALL of them or none: a partial prefix
+        // (e.g. Lunar appended a parameter to the target method) throws InvalidInjectionException at load.
         private val PREFIX_CAPTURE = setOf("Inject")
 
-        // Injectors whose trailing params (after the modified value) must be a
-        // SUFFIX of the target args. `@ModifyVariable` is deliberately excluded: its
-        // capture convention (argsOnly/ordinal/index/prefix semantics) is too fiddly
-        // to model reliably, and it is not the failure mode this check targets.
-        private val SUFFIX_CAPTURE = setOf("ModifyReturnValue", "ModifyExpressionValue")
+        // `@ModifyReturnValue`/`@ModifyExpressionValue` take the modified value as the FIRST param, then
+        // capture target args as a PREFIX from index 0 (a partial prefix is allowed). `@ModifyVariable` is
+        // deliberately excluded: its capture convention is too fiddly to model reliably and is not the
+        // failure mode this check targets.
+        private val VALUE_FIRST_CAPTURE = setOf("ModifyReturnValue", "ModifyExpressionValue")
+
+        // Every kind that captures target args (matched as a prefix; `@Inject` additionally all-or-none).
+        private val CAPTURE_KINDS = PREFIX_CAPTURE + VALUE_FIRST_CAPTURE
 
         // Sugar annotations: an annotated param is a captured local (or callback), not a
         // target arg, so it is REMOVED from the prefix/suffix compatibility check.
@@ -454,7 +468,7 @@ abstract class LunarCompatCheckTask : DefaultTask() {
     /**
      * Verifies name-only `@Local(name=X)` params (no ordinal/index) against the actual
      * LocalVariableTable of the resolved target method(s). Mixin binds a name-only `@Local` by
-     * matching the target's LVT; Lunar's bake usually strips local names, so most surface as the
+     * matching the target's LVT; where Lunar's bake carries no LVT for a method it surfaces as the
      * no-LVT SUSPECT below, and a name-absent finding is only warranted when the LVT is present.
      */
     private fun checkNameOnlyLocals(
@@ -566,41 +580,48 @@ abstract class LunarCompatCheckTask : DefaultTask() {
             )
         }
 
-        // BLOCKER: `@At` member reference must exist in the body of at least one match.
+        // BLOCKER: `@At` member/NEW reference must appear in at least one matched overload's body;
+        // SUSPECT if it is present by owner+name but its descriptor (signature) changed on Lunar.
         for (atTarget in injector.atTargets) {
             val ref = parseMemberRef(atTarget) ?: continue
-            val present = matches.any { method -> bodyReferences(method, ref) }
-            if (!present) {
+            val ownerNamePresent = matches.any { bodyReferences(it, ref, matchDesc = false) }
+            if (!ownerNamePresent) {
                 findings += Finding(
                     Severity.BLOCKER, mixin.name, injector.handlerName, where,
-                    "@At target \"$atTarget\" references ${ref.owner}#${ref.member}, which does not " +
-                        "appear in any matched overload's body. The call/field site was moved or " +
+                    "@At target \"$atTarget\" references ${ref.owner}#${ref.member.ifEmpty { "<new>" }}, which " +
+                        "does not appear in any matched overload's body. The call/field/NEW site was moved or " +
                         "removed by Lunar.",
+                )
+            } else if (ref.desc != null && matches.none { bodyReferences(it, ref, matchDesc = true) }) {
+                findings += Finding(
+                    Severity.SUSPECT, mixin.name, injector.handlerName, where,
+                    "@At target \"$atTarget\" is present by name but no matched overload references it with " +
+                        "descriptor ${ref.desc}; Lunar may have changed its signature, so the injection point " +
+                        "may not bind.",
                 )
             }
         }
 
-        // BLOCKER: captured-arg incompatibility (the ModelBlockRenderer failure mode).
-        // Checked against EACH overload: if incompatible with ANY, Mixin throws.
-        // Skipped for glob selectors, where the intended overload set is ambiguous.
-        if (!isGlob && (injector.kind in PREFIX_CAPTURE || injector.kind in SUFFIX_CAPTURE)) {
+        // BLOCKER: captured-arg incompatibility (the ModelBlockRenderer failure mode). Checked against EACH
+        // overload: if incompatible with ANY, Mixin throws. Skipped for glob selectors (ambiguous overloads).
+        if (!isGlob && injector.kind in CAPTURE_KINDS) {
             val captured = capturedParams(injector)
-            for (match in matches) {
-                val targetArgs = Type.getArgumentTypes(match.desc).toList()
-                val compatible = if (injector.kind in PREFIX_CAPTURE) {
-                    isPrefix(captured, targetArgs)
-                } else {
-                    isSuffix(captured, targetArgs)
-                }
-                if (!compatible) {
-                    val relation = if (injector.kind in PREFIX_CAPTURE) "prefix" else "suffix"
-                    findings += Finding(
-                        Severity.BLOCKER, mixin.name, injector.handlerName, where,
-                        "@${injector.kind} captured args ${captured.map { it?.className ?: "@Coerce *" }} " +
-                            "are not a $relation of matched overload ${match.name}${match.desc} " +
-                            "(target args ${targetArgs.map { it.className }}). This is what triggers " +
-                            "InvalidInjectionException at load time.",
-                    )
+            if (captured.isNotEmpty()) {
+                for (match in matches) {
+                    val targetArgs = Type.getArgumentTypes(match.desc).toList()
+                    // Captured target args are matched from the front (a prefix). `@Inject` must additionally
+                    // capture ALL target args or none - a partial prefix throws InvalidInjectionException.
+                    val prefixOk = isPrefix(captured, targetArgs)
+                    val allOrNoneOk = injector.kind !in PREFIX_CAPTURE || captured.size == targetArgs.size
+                    if (!prefixOk || !allOrNoneOk) {
+                        findings += Finding(
+                            Severity.BLOCKER, mixin.name, injector.handlerName, where,
+                            "@${injector.kind} captured args ${captured.map { it?.className ?: "@Coerce *" }} " +
+                                "are not compatible with matched overload ${match.name}${match.desc} " +
+                                "(target args ${targetArgs.map { it.className }}). This triggers " +
+                                "InvalidInjectionException at load time.",
+                        )
+                    }
                 }
             }
         }
@@ -615,16 +636,16 @@ abstract class LunarCompatCheckTask : DefaultTask() {
      * declared type without changing the captured position).
      *
      * - `@Inject`: strip the trailing CallbackInfo/CIR and any sugar params; the rest is
-     *   the captured PREFIX of the target args.
+     *   the captured prefix of the target args (all-or-none, enforced by the caller).
      * - `@ModifyReturnValue`/`@ModifyExpressionValue`: the first param is the modified
-     *   value; the remaining non-sugar params are the captured SUFFIX.
+     *   value; the remaining non-sugar params are the captured prefix of the target args.
      */
     private fun capturedParams(injector: InjectorInfo): List<Type?> {
         val result = ArrayList<Type?>()
         injector.paramTypes.forEachIndexed { index, type ->
-            // Drop the leading modified value (`@Modify*`), sugar/callback params, and any
-            // CallbackInfo/CIR - none of these are captured target args.
-            val dropped = (injector.kind in SUFFIX_CAPTURE && index == 0) ||
+            // Drop the leading modified value (`@ModifyReturnValue`/`@ModifyExpressionValue`), sugar/callback
+            // params, and any CallbackInfo/CIR - none of these are captured target args.
+            val dropped = (injector.kind in VALUE_FIRST_CAPTURE && index == 0) ||
                 index in injector.sugarParams ||
                 type.descriptor in CALLBACK_TYPES
             if (dropped) {
@@ -642,14 +663,6 @@ abstract class LunarCompatCheckTask : DefaultTask() {
 
     private fun isPrefix(captured: List<Type?>, target: List<Type>): Boolean =
         captured.size <= target.size && captured.indices.all { capturedMatches(captured[it], target[it]) }
-
-    private fun isSuffix(captured: List<Type?>, target: List<Type>): Boolean {
-        if (captured.size > target.size) {
-            return false
-        }
-        val offset = target.size - captured.size
-        return captured.indices.all { capturedMatches(captured[it], target[offset + it]) }
-    }
 
     private fun report(findings: List<Finding>, coverage: String) {
         val blockers = findings.filter { it.severity == Severity.BLOCKER }
@@ -737,15 +750,21 @@ abstract class LunarCompatCheckTask : DefaultTask() {
         return Regex(pattern)
     }
 
-    private class MemberRef(val owner: String, val member: String)
+    private class MemberRef(val owner: String, val member: String, val desc: String?, val isNew: Boolean)
 
     /**
-     * Parses an `@At` target string like `Lowner;name(desc)ret` or `Lowner;field:desc`
-     * into owner + member name. The descriptor tail is intentionally ignored so matching
-     * tolerates trivial descriptor churn.
+     * Parses an `@At` target string into an owner + member (+ optional descriptor). Handles:
+     *  - method: `Lowner;name(args)ret`   - field: `Lowner;name:fieldDesc`
+     *  - NEW:    `(args)Lowner;` (ctor descriptor + constructed type) or a bare `Lowner;` (the type only).
+     * The descriptor tail is kept so a signature change on Lunar can be flagged separately.
      */
     private fun parseMemberRef(target: String): MemberRef? {
         val t = target.trim()
+        // NEW target written as a constructor descriptor: the constructed type is the return type.
+        if (t.startsWith("(")) {
+            val owner = t.substringAfterLast(')').trim().removePrefix("L").removeSuffix(";")
+            return if (owner.isEmpty()) null else MemberRef(owner, "", null, isNew = true)
+        }
         if (!t.startsWith("L")) {
             return null
         }
@@ -754,22 +773,36 @@ abstract class LunarCompatCheckTask : DefaultTask() {
             return null
         }
         val owner = t.substring(1, semi)
-        val rest = t.substring(semi + 1)
+        val rest = t.substring(semi + 1).trim()
+        // A bare `Lowner;` (no member) is a NEW target naming the constructed type.
+        if (rest.isEmpty()) {
+            return MemberRef(owner, "", null, isNew = true)
+        }
         val member = rest.substringBefore('(').substringBefore(':').trim()
         if (member.isEmpty()) {
-            return null
+            return MemberRef(owner, "", null, isNew = true)
         }
-        return MemberRef(owner, member)
+        val desc = when {
+            '(' in rest -> rest.substring(rest.indexOf('('))   // method "(args)ret"
+            ':' in rest -> rest.substringAfter(':').trim()      // field descriptor
+            else -> null
+        }.takeIf { !it.isNullOrEmpty() }
+        return MemberRef(owner, member, desc, isNew = false)
     }
 
-    /** True if [method]'s body contains a method/field/NEW insn matching [ref] by owner+name. */
-    private fun bodyReferences(method: MethodNode, ref: MemberRef): Boolean {
+    /**
+     * True if [method]'s body references [ref]. For a NEW ref, matches a `NEW <owner>` instruction. For a
+     * method/field ref, matches by owner+name, and additionally by descriptor when [matchDesc] is set (and
+     * the ref carries one) - used to tell "reference gone" (owner+name absent) from "signature changed".
+     */
+    private fun bodyReferences(method: MethodNode, ref: MemberRef, matchDesc: Boolean): Boolean {
         for (insn in method.instructions) {
             val matches = when (insn) {
-                is MethodInsnNode -> insn.owner == ref.owner && insn.name == ref.member
-                is FieldInsnNode -> insn.owner == ref.owner && insn.name == ref.member
-                // NEW targets carry only the owner type; the member is the type name.
-                is TypeInsnNode -> insn.desc == ref.owner || insn.desc == ref.member
+                is TypeInsnNode -> ref.isNew && insn.opcode == Opcodes.NEW && insn.desc == ref.owner
+                is MethodInsnNode -> !ref.isNew && insn.owner == ref.owner && insn.name == ref.member &&
+                    (!matchDesc || ref.desc == null || insn.desc == ref.desc)
+                is FieldInsnNode -> !ref.isNew && insn.owner == ref.owner && insn.name == ref.member &&
+                    (!matchDesc || ref.desc == null || insn.desc == ref.desc)
                 else -> false
             }
             if (matches) {

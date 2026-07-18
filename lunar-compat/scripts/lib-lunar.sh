@@ -10,6 +10,15 @@
 LUNAR_LAUNCH_API="https://api.lunarclientprod.com/launcher/launch"
 LUNAR_LATEST_LAUNCHER_YML="https://launcherupdates.lunarclientcdn.com/latest.yml"
 
+# Reject a version/branch string that isn't a plain identifier, before it reaches a JSON body, a python
+# snippet or a filesystem path (the MC version can come from a workflow-dispatch input). Args: <label> <value>
+lunar_safe_token() {
+    case "$2" in
+        *[!A-Za-z0-9._+-]* | "") echo "invalid $1: '$2'" >&2; return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # Repo root = two levels up from this script (.../lunar-compat/scripts/lib-lunar.sh).
 lunar_repo_root() { cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd; }
 
@@ -22,7 +31,7 @@ detect_mc_version() {
 # The current Lunar launcher version (for the User-Agent + request); falls back to a recent value.
 detect_launcher_version() {
     curl -fsSL --max-time 20 "$LUNAR_LATEST_LAUNCHER_YML" 2>/dev/null \
-        | head -1 | sed 's/version: *//;s/[^0-9.].*//' | grep . || echo "3.7.12-ow"
+        | head -1 | sed 's/version: *//;s/[^0-9.].*//' | grep . || echo "3.7.12"
 }
 
 # The fabric-language-kotlin version LiquidBounce requires, parsed from a built LB jar's fabric.mod.json.
@@ -46,6 +55,8 @@ print(m.group(1) if m else "")
 # Only the public "master" branch is reachable without a Lunar account (beta/staging -> NO_PERMISSION_PRIVATE_BRANCH).
 lunar_launch_json() {
     local mc="$1" branch="$2" lver="$3" out="$4"
+    lunar_safe_token "MC version" "$mc" || return 1
+    lunar_safe_token "Lunar branch" "$branch" || return 1
     local hwid iid osrel; hwid="$(cat /proc/sys/kernel/random/uuid)"; iid="$(cat /proc/sys/kernel/random/uuid)"; osrel="$(uname -r)"
     curl -fsSL --max-time 60 -X POST "$LUNAR_LAUNCH_API" \
         -H 'Content-Type: application/json' -H "User-Agent: Lunar Client Launcher v$lver" \
@@ -73,9 +84,18 @@ for a in json.load(open(sys.argv[1]))["launchTypeData"]["artifacts"]:
         print(a["type"] + "\t" + a["name"] + "\t" + a["url"])
 PY
     : > "$dest/.externalfiles"
+    local t n u
     while IFS=$'\t' read -r t n u; do
+        # Reject a traversal/absolute artifact name from the API before writing it anywhere.
+        case "$n" in ""|/*|*..*) echo "skipping unsafe artifact name: '$n'" >&2; continue ;; esac
         mkdir -p "$dest/$(dirname "$n")"
-        curl -fsSL --max-time 240 -o "$dest/$n" "$u"
+        if ! curl -fsSL --max-time 240 -o "$dest/$n" "$u"; then
+            # A missing classpath jar or native breaks the run; a missing data file is tolerable.
+            case "$t" in
+                CLASS_PATH|NATIVES) echo "failed to download required $t artifact: $n" >&2; return 1 ;;
+                *) echo "skipping unavailable EXTERNAL_FILE: $n" >&2; continue ;;
+            esac
+        fi
         case "$t" in
             NATIVES) unzip -o -q "$dest/$n" -d "$dest/natives/" 2>/dev/null || true ;;
             EXTERNAL_FILE) printf '%s,' "$n" >> "$dest/.externalfiles" ;;
@@ -89,6 +109,7 @@ PY
 # Download a fabric-language-kotlin jar from FabricMC maven into <dest>/. Args: <version> <dest_dir>
 fetch_flk() {
     local v="$1" dest="$2"
+    lunar_safe_token "fabric-language-kotlin version" "$v" || return 1
     curl -fsSL --max-time 120 -o "$dest/fabric-language-kotlin-$v.jar" \
         "https://maven.fabricmc.net/net/fabricmc/fabric-language-kotlin/$v/fabric-language-kotlin-$v.jar"
 }
