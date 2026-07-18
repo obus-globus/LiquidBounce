@@ -65,6 +65,7 @@ if [ -z "$DISP" ]; then
   [ -n "$DISP" ] || { echo "[lunar] no free X display in :190-:320"; exit 1; }
   Xvfb "$DISP" -screen 0 854x480x24 -nolisten tcp >/dev/null 2>&1 & XVFB=$!
   for _ in $(seq 1 10); do [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break; sleep 1; done
+  [ -e "/tmp/.X11-unix/X${DISP#:}" ] || { echo "[lunar] Xvfb failed to start on $DISP"; exit 1; }
 fi
 
 echo "[lunar] baking via Genesis (headless; will bake then may crash - bake.zip is what we keep)"

@@ -53,7 +53,7 @@ mkdir -p "$MV" "$MODS" "$LC/settings/game" "$LC/shared/assets" "$LC/textures" "$
 echo "[runtime] querying Lunar launch API..."
 lunar_launch_json "$MC_VERSION" "$BRANCH" "$LVER" "$WORK/resp.json" || { echo "launch API failed"; exit 3; }
 echo "[runtime] downloading Lunar artifacts..."
-lunar_download_artifacts "$WORK/resp.json" "$MV"
+lunar_download_artifacts "$WORK/resp.json" "$MV" || { echo "artifact download failed"; exit 3; }
 MAIN="$(cat "$MV/.mainclass")"; EXT="$(cat "$MV/.externalfiles")"
 CP=""; ICHOR_CP=""
 for jar in "$MV"/*.jar; do CP="${CP:+$CP:}$jar"; ICHOR_CP="${ICHOR_CP:+$ICHOR_CP,}$(basename "$jar")"; done

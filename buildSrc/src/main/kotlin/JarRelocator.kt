@@ -124,6 +124,11 @@ object JarRelocator {
                 var e: ZipEntry? = zin.nextEntry
                 while (e != null) { entries.add(e.name to zin.readBytes()); e = zin.nextEntry }
             }
+            // A non-empty `.jar` entry that yields zero zip entries is not actually a zip (e.g. a placeholder or
+            // a differently-packed archive). Re-packing it would discard its bytes, so pass it through untouched.
+            if (entries.isEmpty() && jarBytes.isNotEmpty()) {
+                return jarBytes
+            }
             val relocatedHere = entries.any { (n, _) -> n.endsWith(".class") && inPkgSlash(n) }
 
             val bos = ByteArrayOutputStream()
