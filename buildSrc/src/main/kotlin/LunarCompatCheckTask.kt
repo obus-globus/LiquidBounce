@@ -119,7 +119,7 @@ abstract class LunarCompatCheckTask : DefaultTask() {
         }.map(::parseMixin)
 
         // Load the target classes referenced by any mixin. ALL mixins are checked, not only injector-bearing
-        // ones: an @Overwrite/@Shadow/accessor mixin whose target class Lunar removed is a hard load failure
+        // ones: an `@Overwrite`/`@Shadow`/accessor mixin whose target class Lunar removed is a hard load failure
         // too, caught by the target-class existence check in checkMixin.
         val referenced = mixins.flatMap { it.targets }.toSet()
         val targets = loadTargets(referenced)
@@ -179,6 +179,11 @@ abstract class LunarCompatCheckTask : DefaultTask() {
         val coerceParams: Set<Int>,
         /** Name-only `@Local` params (no ordinal/index): index -> declared name. */
         val nameOnlyLocals: Map<Int, String>,
+        /** `@Inject(require = N)`; null means default. `require = 0` marks an intentionally-optional injection. */
+        val requireValue: Int?,
+        /** `@Inject(locals = ...)` in a capture mode other than NO_CAPTURE: the handler has trailing captured
+         *  locals that this checker does not model, so the captured-arg check is skipped for it. */
+        val hasLocalCapture: Boolean,
     )
 
     private class MixinInfo(
@@ -289,6 +294,8 @@ abstract class LunarCompatCheckTask : DefaultTask() {
         val selectors = ArrayList<String>()
         val atTargets = ArrayList<String>()
 
+        var requireValue: Int? = null
+        var hasLocalCapture = false
         val values = annotation.values.orEmpty()
         var i = 0
         while (i < values.size) {
@@ -299,6 +306,9 @@ abstract class LunarCompatCheckTask : DefaultTask() {
                 "at" -> collectAtTargets(v, atTargets)
                 // slice(from/to) can carry `@At` too, but is rarely the source of a mismatch.
                 "slice" -> collectAtTargets(v, atTargets)
+                "require" -> requireValue = v as? Int
+                // `locals` is an enum ref `[desc, NAME]`; any mode but NO_CAPTURE adds trailing captured locals.
+                "locals" -> hasLocalCapture = (v as? Array<*>)?.getOrNull(1) != "NO_CAPTURE"
             }
             i += 2
         }
@@ -335,6 +345,8 @@ abstract class LunarCompatCheckTask : DefaultTask() {
             sugarParams = sugarParams,
             coerceParams = coerceParams,
             nameOnlyLocals = nameOnlyLocals,
+            requireValue = requireValue,
+            hasLocalCapture = hasLocalCapture,
         )
     }
 
@@ -559,9 +571,14 @@ abstract class LunarCompatCheckTask : DefaultTask() {
 
         val where = "$targetInternal#$selector"
 
+        // `@Inject(require = 0)` marks an injection the author declared optional: Mixin does not error when it
+        // fails to bind, so a non-resolving selector/@At there is a soft signal, not a hard failure. Its binding
+        // findings are downgraded from BLOCKER to SUSPECT.
+        val bindSev = if (injector.requireValue == 0) Severity.SUSPECT else Severity.BLOCKER
+
         if (matches.isEmpty()) {
             findings += Finding(
-                Severity.BLOCKER, mixin.name, injector.handlerName, where,
+                bindSev, mixin.name, injector.handlerName, where,
                 "selector resolves to zero methods in the target class. " +
                     "The vanilla method was renamed/reshaped or removed by Lunar.",
             )
@@ -587,7 +604,7 @@ abstract class LunarCompatCheckTask : DefaultTask() {
             val ownerNamePresent = matches.any { bodyReferences(it, ref, matchDesc = false) }
             if (!ownerNamePresent) {
                 findings += Finding(
-                    Severity.BLOCKER, mixin.name, injector.handlerName, where,
+                    bindSev, mixin.name, injector.handlerName, where,
                     "@At target \"$atTarget\" references ${ref.owner}#${ref.member.ifEmpty { "<new>" }}, which " +
                         "does not appear in any matched overload's body. The call/field/NEW site was moved or " +
                         "removed by Lunar.",
@@ -603,8 +620,10 @@ abstract class LunarCompatCheckTask : DefaultTask() {
         }
 
         // BLOCKER: captured-arg incompatibility (the ModelBlockRenderer failure mode). Checked against EACH
-        // overload: if incompatible with ANY, Mixin throws. Skipped for glob selectors (ambiguous overloads).
-        if (!isGlob && injector.kind in CAPTURE_KINDS) {
+        // overload: if incompatible with ANY, Mixin throws. Skipped for glob selectors (ambiguous overloads)
+        // and for handlers with trailing `@Inject(locals = ...)` captured locals, whose captured-arg shape this
+        // checker does not model (the local slots follow the target args and are resolved by Mixin at load time).
+        if (!isGlob && !injector.hasLocalCapture && injector.kind in CAPTURE_KINDS) {
             val captured = capturedParams(injector)
             if (captured.isNotEmpty()) {
                 for (match in matches) {
@@ -615,7 +634,7 @@ abstract class LunarCompatCheckTask : DefaultTask() {
                     val allOrNoneOk = injector.kind !in PREFIX_CAPTURE || captured.size == targetArgs.size
                     if (!prefixOk || !allOrNoneOk) {
                         findings += Finding(
-                            Severity.BLOCKER, mixin.name, injector.handlerName, where,
+                            bindSev, mixin.name, injector.handlerName, where,
                             "@${injector.kind} captured args ${captured.map { it?.className ?: "@Coerce *" }} " +
                                 "are not compatible with matched overload ${match.name}${match.desc} " +
                                 "(target args ${targetArgs.map { it.className }}). This triggers " +
@@ -760,10 +779,20 @@ abstract class LunarCompatCheckTask : DefaultTask() {
      */
     private fun parseMemberRef(target: String): MemberRef? {
         val t = target.trim()
-        // NEW target written as a constructor descriptor: the constructed type is the return type.
+        // NEW target written as a constructor descriptor: the constructed type is the return type. Keep the
+        // constructor descriptor as `(args)V` (the shape of the synthetic `<init>` call) so a ctor signature
+        // change on Lunar surfaces as a descriptor SUSPECT rather than being silently dropped.
         if (t.startsWith("(")) {
-            val owner = t.substringAfterLast(')').trim().removePrefix("L").removeSuffix(";")
-            return if (owner.isEmpty()) null else MemberRef(owner, "", null, isNew = true)
+            val close = t.indexOf(')')
+            if (close < 0) {
+                return null
+            }
+            val owner = t.substring(close + 1).trim().removePrefix("L").removeSuffix(";")
+            if (owner.isEmpty()) {
+                return null
+            }
+            val ctorDesc = t.substring(0, close + 1) + "V"
+            return MemberRef(owner, "<init>", ctorDesc, isNew = true)
         }
         if (!t.startsWith("L")) {
             return null
@@ -791,18 +820,28 @@ abstract class LunarCompatCheckTask : DefaultTask() {
     }
 
     /**
-     * True if [method]'s body references [ref]. For a NEW ref, matches a `NEW <owner>` instruction. For a
+     * True if [method]'s body references [ref]. For a NEW ref, matches the `NEW <owner>` instruction (which
+     * carries no descriptor) on the presence pass, and the paired `INVOKESPECIAL <owner>.<init>` on the
+     * descriptor pass so a changed constructor signature can be told apart from a removed one. For a
      * method/field ref, matches by owner+name, and additionally by descriptor when [matchDesc] is set (and
      * the ref carries one) - used to tell "reference gone" (owner+name absent) from "signature changed".
      */
     private fun bodyReferences(method: MethodNode, ref: MemberRef, matchDesc: Boolean): Boolean {
         for (insn in method.instructions) {
-            val matches = when (insn) {
-                is TypeInsnNode -> ref.isNew && insn.opcode == Opcodes.NEW && insn.desc == ref.owner
-                is MethodInsnNode -> !ref.isNew && insn.owner == ref.owner && insn.name == ref.member &&
-                    (!matchDesc || ref.desc == null || insn.desc == ref.desc)
-                is FieldInsnNode -> !ref.isNew && insn.owner == ref.owner && insn.name == ref.member &&
-                    (!matchDesc || ref.desc == null || insn.desc == ref.desc)
+            val matches = when {
+                ref.isNew && insn is TypeInsnNode ->
+                    // NEW carries no descriptor, so it can only confirm the type is still constructed here,
+                    // not the constructor signature; skip it on the descriptor-strict pass.
+                    !matchDesc && insn.opcode == Opcodes.NEW && insn.desc == ref.owner
+                ref.isNew && insn is MethodInsnNode ->
+                    insn.owner == ref.owner && insn.name == "<init>" &&
+                        (!matchDesc || ref.desc == null || insn.desc == ref.desc)
+                !ref.isNew && insn is MethodInsnNode ->
+                    insn.owner == ref.owner && insn.name == ref.member &&
+                        (!matchDesc || ref.desc == null || insn.desc == ref.desc)
+                !ref.isNew && insn is FieldInsnNode ->
+                    insn.owner == ref.owner && insn.name == ref.member &&
+                        (!matchDesc || ref.desc == null || insn.desc == ref.desc)
                 else -> false
             }
             if (matches) {
