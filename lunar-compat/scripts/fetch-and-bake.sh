@@ -14,26 +14,25 @@
 # `master` (release) branch is reachable without a Lunar account; `beta`/`staging` return NO_PERMISSION_PRIVATE_BRANCH.
 #
 # Usage: fetch-and-bake.sh [MC_VERSION] [OUTPUT_JAR]
-#   MC_VERSION  default 26.2   (should match the Minecraft version LiquidBounce targets)
+#   MC_VERSION  default: auto-detected from LiquidBounce's gradle/libs.versions.toml
 #   OUTPUT_JAR  default lunar-compat/lunar-classes.jar   (+ a sibling .meta with the tested Lunar build info)
 #   env LUNAR_BRANCH  default master  (beta/staging need Lunar account access)
 # Requires: curl, python3, a JRE matching the MC version's Java level (26.2 -> Java 25), Xvfb (headless), unzip.
 set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/lib-lunar.sh"   # shared, update-resistant helpers (MC version + launch API live here)
 
-MC_VERSION="${1:-26.2}"
+MC_VERSION="${1:-$(detect_mc_version)}"   # default: the MC version LiquidBounce currently targets
 OUT_JAR="${2:-lunar-compat/lunar-classes.jar}"
 BRANCH="${LUNAR_BRANCH:-master}"
 WORK="${LUNAR_WORK:-$(mktemp -d /tmp/lunar-bake.XXXXXX)}"
 JAVA_BIN="${JAVA_BIN:-java}"
-API="https://api.lunarclientprod.com/launcher/launch"
-LAUNCHER_VER="$(curl -fsSL --max-time 20 https://launcherupdates.lunarclientcdn.com/latest.yml | head -1 | sed 's/version: *//;s/[^0-9.].*//' || echo 3.4.9)"
+LAUNCHER_VER="$(detect_launcher_version)"
+HWID="$(cat /proc/sys/kernel/random/uuid)"; IID="$(cat /proc/sys/kernel/random/uuid)"   # for the Genesis bake args below
 echo "[lunar] MC=$MC_VERSION branch=$BRANCH launcher=$LAUNCHER_VER work=$WORK"
 mkdir -p "$WORK/jars" "$WORK/natives" "$WORK/run" "$WORK/cache"
 
-HWID="$(cat /proc/sys/kernel/random/uuid)"; IID="$(cat /proc/sys/kernel/random/uuid)"; OSREL="$(uname -r)"
-curl -fsSL --max-time 60 -X POST "$API" -H 'Content-Type: application/json' -H "User-Agent: Lunar Client Launcher v$LAUNCHER_VER" \
-  -d "{\"os\":\"linux\",\"os_release\":\"$OSREL\",\"arch\":\"x64\",\"hwid\":\"$HWID\",\"hwid_private\":\"$HWID\",\"installation_id\":\"$IID\",\"launcher_version\":\"$LAUNCHER_VER\",\"version\":\"$MC_VERSION\",\"branch\":\"$BRANCH\",\"launch_type\":\"OFFLINE\",\"module\":\"lunar\"}" \
-  -o "$WORK/resp.json"
+lunar_launch_json "$MC_VERSION" "$BRANCH" "$LAUNCHER_VER" "$WORK/resp.json"
 
 python3 - "$WORK" <<'PY'
 import json,sys
