@@ -80,4 +80,4 @@ cat build/reports/lunar-runtime-compat.txt
 
 The static check engine is `buildSrc/src/main/kotlin/LunarCompatCheckTask.kt` (an ASM selector resolver pointed at
 Lunar's baked classes). The okhttp/okio relocation that lets LiquidBounce run under Lunar at all is
-`buildSrc/src/main/kotlin/RelocateJarTask.kt`, wired into the `jar` task.
+`buildSrc/src/main/kotlin/JarRelocator.kt`, run in the `jar` task's `doLast`.

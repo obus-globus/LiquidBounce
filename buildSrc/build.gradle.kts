@@ -13,7 +13,7 @@ dependencies {
     // bytecode (class-file major 69) that LiquidBounce compiles to.
     implementation("org.ow2.asm:asm:9.8")
     implementation("org.ow2.asm:asm-tree:9.8")
-    // asm-commons provides ClassRemapper for RelocateJarTask.
+    // asm-commons provides ClassRemapper for JarRelocator.
     implementation("org.ow2.asm:asm-commons:9.8")
     testImplementation(kotlin("test"))
 }

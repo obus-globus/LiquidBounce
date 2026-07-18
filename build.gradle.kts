@@ -392,23 +392,16 @@ tasks.jar {
             "${it}_${archivesBaseName.get()}"
         }
     }
-}
 
-// Relocate the bundled okhttp/okio into a private package so a host client can't shadow LiquidBounce's
-// copy on a shared classloader (required to run under Lunar Client - see RelocateJarTask for the why).
-val relocateJij = tasks.register<RelocateJarTask>("relocateJij") {
-    jar.set(
-        layout.buildDirectory.file(
-            providers.gradleProperty("archives_base_name")
-                .zip(providers.gradleProperty("mod_version")) { name, version -> "libs/$name-$version.jar" }
-        )
-    )
-    packages.set(listOf("okhttp3", "okio"))
-    prefixString = "net/ccbluex/liquidbounce/libs/"
+    // Relocate the bundled okhttp/okio into a private package so a host that ships its own copy on a shared
+    // classloader (e.g. Lunar Client's stripped okhttp3) can't shadow LiquidBounce's. Done in the jar task's
+    // own action so the relocated jar is this task's declared output and up-to-date checking keeps working.
+    doLast {
+        val outputJar = archiveFile.get().asFile
+        JarRelocator.relocate(outputJar, listOf("okhttp3", "okio"), "net/ccbluex/liquidbounce/libs/")
+        logger.lifecycle("Relocated okhttp3, okio into net/ccbluex/liquidbounce/libs/ in ${outputJar.name}")
+    }
 }
-// LiquidBounce Nextgen ships mojmap-named, so Loom adds no `remapJar`; the final artifact (with the
-// jar-in-jar nested libs) is the `jar` task's output. Relocate right after it.
-tasks.named("jar") { finalizedBy(relocateJij) }
 
 tasks.register<Copy>("copyZipInclude") {
     from("zip_include/")
