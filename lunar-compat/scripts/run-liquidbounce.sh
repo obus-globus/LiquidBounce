@@ -55,8 +55,8 @@ lunar_launch_json "$MC_VERSION" "$BRANCH" "$LVER" "$WORK/resp.json" || { echo "l
 echo "[runtime] downloading Lunar artifacts..."
 lunar_download_artifacts "$WORK/resp.json" "$MV"
 MAIN="$(cat "$MV/.mainclass")"; EXT="$(cat "$MV/.externalfiles")"
-CP="$(ls "$MV"/*.jar | tr '\n' ':' | sed 's/:$//')"
-ICHOR_CP="$(ls "$MV"/*.jar | xargs -n1 basename | tr '\n' ',' | sed 's/,$//')"
+CP=""; ICHOR_CP=""
+for jar in "$MV"/*.jar; do CP="${CP:+$CP:}$jar"; ICHOR_CP="${ICHOR_CP:+$ICHOR_CP,}$(basename "$jar")"; done
 
 # --- stage LiquidBounce + fabric-language-kotlin into Lunar's Fabric mod dir ---
 cp "$LB_JAR" "$MODS/"
@@ -73,8 +73,11 @@ AIDX="$(curl -fsSL --max-time 30 "$VURL" 2>/dev/null | python3 -c "import sys,js
 GAMEROOT="$WORK/game"; mkdir -p "$GAMEROOT/.minecraft"; cd "$GAMEROOT"
 DISP="${DISPLAY:-}"
 if [ -z "$DISP" ]; then
-    for n in $(seq 195 260); do [ -e "/tmp/.X11-unix/X$n" ] || { DISP=":$n"; break; }; done   # first free display
-    Xvfb "$DISP" -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 & XVFB=$!; sleep 2
+    for n in $(seq 195 320); do [ -e "/tmp/.X11-unix/X$n" ] || { DISP=":$n"; break; }; done   # first free display
+    [ -n "$DISP" ] || { echo "[runtime] no free X display in :195-:320" >&2; exit 3; }
+    Xvfb "$DISP" -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 & XVFB=$!
+    for _ in $(seq 1 10); do [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break; sleep 1; done
+    [ -e "/tmp/.X11-unix/X${DISP#:}" ] || { echo "[runtime] Xvfb failed to start on $DISP" >&2; exit 3; }
 fi
 LOG="$WORK/boot.log"
 echo "[runtime] booting Lunar + LiquidBounce (headless)..."
@@ -98,7 +101,9 @@ for _ in $(seq 1 50); do
     sleep 3
 done
 sleep 6
-kill "$GPID" 2>/dev/null; wait "$GPID" 2>/dev/null   # let the JVM's log tail flush before grading
+kill "$GPID" 2>/dev/null                              # let the JVM's log tail flush before grading
+for _ in $(seq 1 5); do kill -0 "$GPID" 2>/dev/null || break; sleep 1; done
+kill -9 "$GPID" 2>/dev/null; wait "$GPID" 2>/dev/null
 [ -n "${XVFB:-}" ] && kill "$XVFB" 2>/dev/null || true
 
 # --- grade the harvested log ---

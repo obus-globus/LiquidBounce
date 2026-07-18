@@ -23,7 +23,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/lib-lunar.sh"   # shared, update-resistant helpers (MC version + launch API live here)
 
 MC_VERSION="${1:-$(detect_mc_version || true)}"
-OUT_JAR="${2:-lunar-compat/lunar-classes.jar}"
+OUT_JAR="${2:-$(lunar_repo_root)/lunar-compat/lunar-classes.jar}"
 BRANCH="${LUNAR_BRANCH:-master}"
 WORK="${LUNAR_WORK:-$(mktemp -d /tmp/lunar-bake.XXXXXX)}"
 JAVA_BIN="${JAVA_BIN:-java}"
@@ -57,12 +57,14 @@ VURL="$(curl -fsSL --max-time 30 https://launchermeta.mojang.com/mc/game/version
 AIDX="$(curl -fsSL --max-time 30 "$VURL" 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin)['assetIndex']['id'])" 2>/dev/null || echo "$MC_VERSION")"
 echo "[lunar] assetIndex=$AIDX"
 
-CP="$(ls "$WORK"/jars/*.jar | tr '\n' ':' | sed 's/:$//')"; ICHOR_CP="$(echo "$CP" | tr ':' ',')"
+CP=""; for jar in "$WORK"/jars/*.jar; do CP="${CP:+$CP:}$jar"; done; ICHOR_CP="$(echo "$CP" | tr ':' ',')"
 MAIN="$(cat "$WORK/mainclass.txt")"
 DISP="${DISPLAY:-}"
 if [ -z "$DISP" ]; then
-  for n in $(seq 190 260); do [ -e "/tmp/.X11-unix/X$n" ] || { DISP=":$n"; break; }; done   # first free display
-  Xvfb "$DISP" -screen 0 854x480x24 -nolisten tcp >/dev/null 2>&1 & XVFB=$!; sleep 2
+  for n in $(seq 190 320); do [ -e "/tmp/.X11-unix/X$n" ] || { DISP=":$n"; break; }; done   # first free display
+  [ -n "$DISP" ] || { echo "[lunar] no free X display in :190-:320"; exit 1; }
+  Xvfb "$DISP" -screen 0 854x480x24 -nolisten tcp >/dev/null 2>&1 & XVFB=$!
+  for _ in $(seq 1 10); do [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break; sleep 1; done
 fi
 
 echo "[lunar] baking via Genesis (headless; will bake then may crash - bake.zip is what we keep)"
@@ -95,10 +97,11 @@ LUNAR_COMMIT="$(grep -aoE 'Commit Hash: [0-9a-f]+' "$WORK/bake.log" | head -1 | 
 LUNAR_LOGBRANCH="$(grep -aoE 'Branch: [A-Za-z0-9._/-]+' "$WORK/bake.log" | head -1 | awk '{print $2}' || true)"
 {
   echo "mc_version=$MC_VERSION"
-  echo "branch=${LUNAR_LOGBRANCH:-$BRANCH}"
+  echo "requested_branch=$BRANCH"                        # the channel we asked the launch API for
+  echo "genesis_branch=${LUNAR_LOGBRANCH:-unknown}"      # the build channel Genesis reports internally
   echo "lunar_commit=${LUNAR_COMMIT:-unknown}"
   echo "launcher_version=$LAUNCHER_VER"
   echo "fetched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "${OUT_JAR}.meta"
-echo "[lunar] tested build: MC $MC_VERSION, branch ${LUNAR_LOGBRANCH:-$BRANCH}, Lunar commit ${LUNAR_COMMIT:-unknown}"
+echo "[lunar] tested build: MC $MC_VERSION, branch $BRANCH (genesis: ${LUNAR_LOGBRANCH:-unknown}), Lunar commit ${LUNAR_COMMIT:-unknown}"
 echo "[lunar] done. Reference jar: $OUT_JAR  (build info: ${OUT_JAR}.meta)"
