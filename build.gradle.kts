@@ -381,6 +381,15 @@ tasks.jar {
             "${it}_${archivesBaseName.get()}"
         }
     }
+
+    // Relocate the bundled okhttp/okio into a private package so a host that ships its own copy on a shared
+    // classloader (e.g. Lunar Client's stripped okhttp3) can't shadow LiquidBounce's. Done in the jar task's
+    // own action so the relocated jar is this task's declared output and up-to-date checking keeps working.
+    doLast {
+        val outputJar = archiveFile.get().asFile
+        JarRelocator.relocate(outputJar, listOf("okhttp3", "okio"), "net/ccbluex/liquidbounce/libs/")
+        logger.lifecycle("Relocated okhttp3, okio into net/ccbluex/liquidbounce/libs/ in ${outputJar.name}")
+    }
 }
 
 tasks.register<Copy>("copyZipInclude") {
