@@ -308,7 +308,8 @@ abstract class LunarCompatCheckTask : DefaultTask() {
                 "slice" -> collectAtTargets(v, atTargets)
                 "require" -> requireValue = v as? Int
                 // `locals` is an enum ref `[desc, NAME]`; any mode but NO_CAPTURE adds trailing captured locals.
-                "locals" -> hasLocalCapture = (v as? Array<*>)?.getOrNull(1) != "NO_CAPTURE"
+                // If it isn't the expected String[] (never happens for a valid enum value), leave the default.
+                "locals" -> hasLocalCapture = (v as? Array<*>)?.getOrNull(1)?.let { it != "NO_CAPTURE" } ?: false
             }
             i += 2
         }
@@ -605,7 +606,7 @@ abstract class LunarCompatCheckTask : DefaultTask() {
             if (!ownerNamePresent) {
                 findings += Finding(
                     bindSev, mixin.name, injector.handlerName, where,
-                    "@At target \"$atTarget\" references ${ref.owner}#${ref.member.ifEmpty { "<new>" }}, which " +
+                    "@At target \"$atTarget\" references ${ref.owner}#${if (ref.isNew) "<new>" else ref.member}, which " +
                         "does not appear in any matched overload's body. The call/field/NEW site was moved or " +
                         "removed by Lunar.",
                 )
