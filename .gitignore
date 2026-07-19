@@ -15,3 +15,7 @@
 .DS_Store
 *.log
 /.fabric/
+
+# Lunar compat: fetched/baked Lunar classes + build metadata (produced at check time, never committed)
+lunar-compat/lunar-classes.jar
+lunar-compat/lunar-classes.jar.meta

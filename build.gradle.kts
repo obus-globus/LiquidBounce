@@ -407,3 +407,19 @@ tasks.named<Jar>("sourcesJar") {
 tasks.named("build") {
     dependsOn("copyZipInclude")
 }
+
+// -------------------------------------------------------------------------------------------------------------------
+// Lunar Client compatibility check: resolve every LiquidBounce mixin's target + injector selectors against Lunar's
+// baked Minecraft classes (see lunar-compat/). A "broken mixin" means its target class/method/injection point does
+// not exist in Lunar's runtime, so it would fail to apply on Lunar. Produce the Lunar jar with the fetch+bake script
+// then run:  ./gradlew checkLunarCompat -PlunarJar=/path/to/lunar-26.2-classes.jar
+tasks.register<LunarCompatCheckTask>("checkLunarCompat") {
+    group = "verification"
+    description = "Reports which LiquidBounce mixins would fail to apply on Lunar Client (vs Lunar's baked classes)."
+    dependsOn("classes")
+    mixinClasses.from(sourceSets["main"].output)
+    val lunarJar = (findProperty("lunarJar") as String?) ?: "lunar-compat/lunar-classes.jar"
+    targetClasses.from(files(lunarJar))
+    report.set(layout.buildDirectory.file("reports/lunar-compat.txt"))
+    strict.set(findProperty("lunarStrict") == "true")
+}
