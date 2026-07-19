@@ -305,8 +305,9 @@ object ClientRenderPipelines {
      * @see net.ccbluex.liquidbounce.features.module.modules.render.ModuleBlockESP
      */
     private val OutlineQuads = newPipeline("outline_quads") {
+        // DEBUG_FILLED_SNIPPET already carries GLOBALS_SNIPPET; adding it again duplicates the Globals
+        // bind group and shader linking throws "Duplicate bind name 'Globals'".
         withSnippet(RenderPipelines.DEBUG_FILLED_SNIPPET)
-        withSnippet(RenderPipelines.GLOBALS_SNIPPET)
         withVertexShader(ClientShaders.Vertex.PosColorRelativeToCamera)
         withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR)
         withPrimitiveTopology(PrimitiveTopology.QUADS)
@@ -316,8 +317,8 @@ object ClientRenderPipelines {
     }
 
     private val OutlineQuadsNoColor = newPipeline("outline_quads_no_color") {
+        // DEBUG_FILLED_SNIPPET already carries GLOBALS_SNIPPET; don't add it again (see OutlineQuads).
         withSnippet(RenderPipelines.DEBUG_FILLED_SNIPPET)
-        withSnippet(RenderPipelines.GLOBALS_SNIPPET)
         withVertexShader(ClientShaders.Vertex.PosRelativeToCamera)
         withFragmentShader(ClientShaders.Fragment.PosRelativeToCamera)
         withVertexBinding(0, DefaultVertexFormat.POSITION)
