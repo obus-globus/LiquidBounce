@@ -70,7 +70,7 @@ final class FabricPlatform implements LoaderPlatform {
             if (!isLb && (onCp.contains(base.toLowerCase()) || isLoaderProvided(base))) { skipped++; continue; }   // fabric-api/kotlin/asm/mixin/... already present
             Path o = tmp.resolve(base);
             try (InputStream in = jf.getInputStream(e)) { Files.copy(in, o, StandardCopyOption.REPLACE_EXISTING); } o.toFile().deleteOnExit();
-            if (isLb) { lbBundle = o; addToClassPath(o, "net.ccbluex"); }
+            if (isLb) { lbBundle = o; addToClassPath(o, payloadPrefixes(o).toArray(new String[0])); }
             else addToClassPath(o);
             pushed++;
         } }
@@ -82,6 +82,17 @@ final class FabricPlatform implements LoaderPlatform {
     private static boolean isLoaderProvided(String base){ String b=base.toLowerCase();
         return b.startsWith("asm-")||b.startsWith("asm.")||b.contains("sponge-mixin")||b.contains("mixinextras")||b.startsWith("fabric-loader"); }
     private void addToClassPath(Path jar, String... prefixes) throws Exception { mAddToClassPath.invoke(launcher, jar, prefixes); }
+    /** Top-level (2-segment) package prefixes the payload jar provides, so Knot exposes THE MOD'S OWN classes to the
+     *  game (its entrypoint, mixin plugin, ...). Derived from the jar instead of hardcoding one mod's root package. */
+    private static Set<String> payloadPrefixes(Path jar) throws Exception {
+        Set<String> pk = new HashSet<>();
+        try (JarFile jf = new JarFile(jar.toFile())) { for (var en = jf.entries(); en.hasMoreElements();) {
+            String n = en.nextElement().getName(); if (!n.endsWith(".class")) continue;
+            int a = n.indexOf('/'); if (a < 0) continue; int b = n.indexOf('/', a + 1);
+            pk.add((b < 0 ? n.substring(0, a) : n.substring(0, b)).replace('/', '.')); } }
+        InjectionLogger.info("payload packages exposed to Knot: " + pk);
+        return pk;
+    }
 
     // ---- expose the injector runtime to Knot via PARENT delegation (NOT a second Knot-owned copy) --------------------
     // Sidecars run on Knot but reference lbrt.* helpers (AwReflect/DuckDispatch/JoinGate), which the agent loaded on the
@@ -146,11 +157,12 @@ final class FabricPlatform implements LoaderPlatform {
         InjectionLogger.info("applied liquidbounce.accesswidener to live Knot ClassTweaker ("+awBytes.length+" bytes)");
 
         // 2) register LB's mixin configs into the live service, then downgrade them to required:false (probe workaround #1).
-        Mixins.addConfiguration("wurst.mixins.json");
+        Mixins.addConfiguration("liquidbounce.mixins.json");
+        Mixins.addConfiguration("liquidbounce-fabric.mixins.json");
         int downgraded = 0;
         for (Object cfg : Mixins.getConfigs()) {                                   // org.spongepowered.asm.mixin.transformer.Config
             String name = (String) cfg.getClass().getMethod("getName").invoke(cfg);
-            if (name == null || !name.contains("wurst")) continue;
+            if (name == null || !name.contains("liquidbounce")) continue;
             Object mixinConfig = cfg.getClass().getMethod("getConfig").invoke(cfg); // IMixinConfig -> MixinConfig
             Field req = mixinConfig.getClass().getDeclaredField("required"); req.setAccessible(true); req.setBoolean(mixinConfig, false);
             downgraded++;

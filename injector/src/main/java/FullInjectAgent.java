@@ -118,6 +118,7 @@ public class FullInjectAgent {
             throw new IllegalStateException("Late-attach sidecar definition gate failed");
         }
         InjectionLogger.info("converted "+conv+" targets ("+eager+" sidecars eager-defined); ifaceMap="+ifaceMap.size()+" interfaces; skipped="+skipped.size()+(skipped.isEmpty()?"":" "+skipped));
+        InjectionLogger.info("ifaceMap keys: " + ifaceMap.keySet());
         for (var ie : ifaceMap.entrySet()) for (String[] impl : ie.getValue())
             lbrt.DuckDispatch.register(ie.getKey(), impl[0], impl[1]);
 
@@ -151,9 +152,10 @@ public class FullInjectAgent {
                     }
                     if (c==null) { byte[] w=awApply(n,t); if(w!=null) t=w; }
                     return t; }
-                if (n.startsWith("net/ccbluex/")) {
+                if (RetransformConverter.PAYLOAD_CLASSES.contains(n)) {
                     byte[] rw = AccessorBridgeRewriter.rewrite(n, b);
                     rw = ifaceMap.isEmpty()? rw : RetransformConverter.rewriteCaller(rw, ifaceMap);
+                    if (DEBUG) InjectionLogger.info("CFT caller "+n+" changed="+(rw!=b));
                     rw = RetransformConverter.rewriteLbAw(rw, awRes);
                     if (!LateAttachVerifier.verifyCaller(n, b, rw, gadded, gfield, ifaceMap)) return null;
                     return rw==b? null : rw;
@@ -170,6 +172,16 @@ public class FullInjectAgent {
         inst.addTransformer(CFT, true);
         everInjected = true;   // committed: LB staged + targets converted + transformer live -> refuse any re-inject
         refreshLoadedAccessState(inst,aw);
+
+        // Payload classes loaded early (e.g. pulled in during mixin-config processing, before the CFT existed) missed
+        // the on-load caller rewriting, so their dropped-interface casts (e.g. (IMinecraftClient) mc) still name a
+        // de-implemented interface. Retransform them now (a body-only edit -> retransform-legal) so those route to
+        // DuckDispatch/the concrete class before the mod bootstraps.
+        try { List<Class<?>> lp = new ArrayList<>();
+            for (Class<?> c : inst.getAllLoadedClasses()) { String cn = c.getName().replace('.','/');
+                if (RetransformConverter.PAYLOAD_CLASSES.contains(cn) && !convMap.containsKey(cn) && inst.isModifiableClass(c)) lp.add(c); }
+            if (!lp.isEmpty()) { inst.retransformClasses(lp.toArray(new Class[0])); InjectionLogger.info("retransformed "+lp.size()+" already-loaded payload classes for caller rewriting: "+lp); }
+        } catch(Throwable t){ InjectionLogger.warn("payload caller retransform failed: "+rootMsg(t)); }
 
         // Force the join entry point through the installed CFT now. A later first-click load is too late to prove that
         // the gate exists before registries are thawed.
@@ -198,20 +210,21 @@ public class FullInjectAgent {
             Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft", false, SYS);
             Object mc = mcCls.getMethod("getInstance").invoke(null);
             Runnable kick = () -> { RegistryThawSession thaw=null; try {
-                // Wurst is a plain synchronous ModInitializer: WurstInitializer.onInitialize() ->
-                // WurstClient.INSTANCE.initialize(). Post-attach the game is fully up (safer than mod-load time),
-                // so we init inside a registry-thaw window, then publish the already-loaded target retransforms.
+                // Initializing the singleton registers its ClientStartEvent handler. Loading it with initialize=false
+                // fires the event into an empty listener set; the readiness waiter then initializes LiquidBounce on
+                // its own background thread after the event was already lost, causing module singleton races.
+                Class.forName("net.ccbluex.liquidbounce.LiquidBounce", true, SYS);
+                Class<?> em = Class.forName("net.ccbluex.liquidbounce.event.EventManager", true, SYS);
+                Object emInst = em.getField("INSTANCE").get(null);
+                Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientStartEvent", true, SYS).getField("INSTANCE").get(null);
+                java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event", true, SYS));
                 if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
                 thaw = RegistryThawSession.begin();
-                InjectionLogger.info("(MC main thread) init Wurst via WurstInitializer.onInitialize()");
-                Object wi = Class.forName("net.wurstclient.WurstInitializer", true, SYS).getDeclaredConstructor().newInstance();
-                wi.getClass().getMethod("onInitialize").invoke(wi);
-                if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("Wurst init produced verification errors");
-                InjectionLogger.info("WurstInitializer.onInitialize() returned; activating loaded targets");
-                thaw.close(); thaw=null;
-                activateLoadedTargets(INST);
-                lbrt.JoinGate.cancelAndOpen();
-                InjectionLogger.info("Wurst injection complete");
+                InjectionLogger.info("(MC main thread) callEvent(ClientStartEvent)");
+                callEvent.invoke(emInst, ev);
+                if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("ClientStartEvent class loading produced verification errors");
+                InjectionLogger.info("ClientStartEvent dispatched");
+                restoreRegistriesAfterInitialization(mcCls, mc, thaw);
             } catch (Throwable t) {
                 // Always reopen the gate on ANY kick failure, including a throw BEFORE RegistryThawSession.begin()
                 // (LiquidBounce clinit, reflection, or the fatal-error check) where thaw is still null — otherwise
