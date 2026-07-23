@@ -464,6 +464,17 @@ public class RetransformConverter {
         return null;
     }
     String[] addedCallTarget(MethodInsnNode mi) { return addedCall(mi.owner, mi.name, mi.desc, mi.getOpcode() == Opcodes.INVOKESTATIC); }
+    /** Static variant of {@link #addedCall} over the global GADDED map, for the live caller-rewrite path
+     *  ({@link #rewriteCaller}). Walks the receiver type's hierarchy to the target that declared the added method. */
+    static String[] addedCallStatic(String owner, String name, String desc, boolean callStatic) {
+        if (GADDED == null || name.equals("<init>") || name.equals("<clinit>")) return null;
+        String c = owner;
+        for (int guard = 0; c != null && !c.equals("java/lang/Object") && guard++ < 256; c = superOf(c)) {
+            String[] g = GADDED.get(gkey(c, name, desc));
+            if (g != null) return callStatic == "1".equals(g[2]) ? g : null;
+        }
+        return null;
+    }
 
     /** SIDECAR-relocation path: can the sidecar legally name this type in a CHECKCAST? Inaccessible iff the type is
      *  non-public AND in a different package than the sidecar (public or same-package are nameable). Unknown bytes ->
@@ -780,6 +791,19 @@ public class RetransformConverter {
                     } else {
                         rewriteDuckInvokeInline(m, mi);
                     }
+                    n++;
+                } else if (p instanceof MethodInsnNode mi && mi.getOpcode() != Opcodes.INVOKEINTERFACE
+                        && addedCallStatic(mi.owner, mi.name, mi.desc, mi.getOpcode() == Opcodes.INVOKESTATIC) != null) {
+                    // Call to a mixin-ADDED method (relocated to a sidecar) reached via a CONCRETE-class
+                    // INVOKEVIRTUAL/INVOKESPECIAL/INVOKESTATIC rather than through a duck interface. LB routes added
+                    // methods through duck interfaces (handled above); clients that OVERRIDE an inherited vanilla
+                    // method call the concrete class directly, so redirect those sites to the sidecar static exactly
+                    // as rewriteRefs does — preserving the mixin override behavior instead of silently dispatching to
+                    // the surviving inherited implementation.
+                    String[] g = addedCallStatic(mi.owner, mi.name, mi.desc, mi.getOpcode() == Opcodes.INVOKESTATIC);
+                    String ot = g[0], os = g[1]; boolean gStatic = "1".equals(g[2]);
+                    String nd = eraseIfaceDesc(gStatic ? mi.desc : "(L" + ot + ";" + mi.desc.substring(1));
+                    m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, os, "h$" + mi.name, nd, false));
                     n++;
                 }
             }
