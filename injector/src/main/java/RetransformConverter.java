@@ -395,6 +395,13 @@ public class RetransformConverter {
     // volatile write/read gives the happens-before that safely publishes each fully-populated table to those readers.
     public static volatile Map<String,String[]> GADDED, GFIELD;
     public static volatile Map<String,List<String[]>> GIFACE;
+    /** Internal names of classes provided by the staged payload (the mod jar). Lets us tell a mixin-ADDED payload
+     *  "duck" interface (a real problem when used as a value type - the de-implemented target no longer satisfies it)
+     *  from a pre-existing/vanilla interface the mixin merely also implements (whose type still exists and is used
+     *  legitimately by real implementors elsewhere, so a descriptor mention of it is fine). */
+    public static volatile Set<String> PAYLOAD_CLASSES = java.util.Collections.emptySet();
+    /** True if the mixin-added interface is one the payload itself defines (vs a pre-existing runtime interface). */
+    public static boolean isPayloadIface(String internal) { return PAYLOAD_CLASSES.contains(internal); }
     String[] addedFieldTarget(String owner, String name, String desc) {
         if (GFIELD == null) return null;
         for (String c = owner; c != null && !c.equals("java/lang/Object"); c = superOf(c)) { String[] g = GFIELD.get(gkey(c, name, desc)); if (g != null) return g; }

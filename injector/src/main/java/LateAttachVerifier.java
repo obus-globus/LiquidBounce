@@ -163,8 +163,13 @@ public final class LateAttachVerifier {
     }
 
     private static void scanDesc(String owner,String artifact,String method,String desc,Map<String,List<String[]>> dropped) {
-        for(String iface:dropped.keySet()) if(desc.contains("L"+iface+";"))
-            add("ERROR","DROPPED_INTERFACE_DESCRIPTOR",owner,artifact,method,desc);
+        // Only a PAYLOAD-defined duck interface is a real descriptor problem: the de-implemented target no longer
+        // satisfies it. A pre-existing/vanilla interface a mixin merely also implements still exists as a type with
+        // real implementors, so a descriptor mentioning it is legal (its instanceof/cast/invokeinterface sites on the
+        // de-implemented class are caught precisely + rewritten separately).
+        for(String iface:dropped.keySet())
+            if(RetransformConverter.isPayloadIface(iface) && desc.contains("L"+iface+";"))
+                add("ERROR","DROPPED_INTERFACE_DESCRIPTOR",owner,artifact,method,desc);
     }
 
     private static void detectAccessorStubs(String owner, byte[] bytes) {

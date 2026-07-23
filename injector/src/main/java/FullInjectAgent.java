@@ -54,6 +54,7 @@ public class FullInjectAgent {
         InjectionLogger.info("staging LB bundle ("+preLoaded.size()+" classes already loaded)");
         File self = new File(FullInjectAgent.class.getProtectionDomain().getCodeSource().getLocation().toURI());
         Path lbBundle = PLATFORM.stageBundle(inst, self);
+        RetransformConverter.PAYLOAD_CLASSES = readPayloadClasses(lbBundle);
 
         PLATFORM.initMixin();
         Object aw = PLATFORM.accessWidener();
@@ -223,6 +224,18 @@ public class FullInjectAgent {
             mcCls.getMethod("execute", Runnable.class).invoke(mc, kick);
             InjectionLogger.info("scheduled LB bootstrap on MC main thread");
         } catch (Throwable e) { LateAttachVerifier.error("BOOTSTRAP_SCHEDULE_FAILURE","LiquidBounce","bootstrap",rootMsg(e)); lbrt.JoinGate.cancelAndOpen(); InjectionLogger.error("bootstrap kick failed", e); }
+    }
+
+    /** Internal names of every class in the staged payload jar; used to tell a payload-defined duck interface from a
+     *  pre-existing/vanilla interface a mixin also implements. */
+    static Set<String> readPayloadClasses(Path payloadJar) {
+        Set<String> names = new HashSet<>();
+        try (JarFile jf = new JarFile(payloadJar.toFile())) {
+            for (var en = jf.entries(); en.hasMoreElements();) { String n = en.nextElement().getName();
+                if (n.endsWith(".class")) names.add(n.substring(0, n.length() - 6)); }
+        } catch (Throwable t) { InjectionLogger.warn("could not read payload class names: " + rootMsg(t)); }
+        InjectionLogger.info("payload classes indexed: " + names.size());
+        return names;
     }
 
     /** Reverse a prior late-attach in the SAME JVM (re-attach the agent with agentArgs "mode=uninject"). Two steps, both
