@@ -69,7 +69,11 @@ public final class LateAttachVerifier {
 
     private static void verifySchema(String owner, String artifact, byte[] expectedBytes, byte[] actualBytes) {
         try {
-            Schema e = Schema.read(expectedBytes), a = Schema.read(actualBytes);
+            // A CALLER class may legally have payload duck-interface TYPES erased in its field/method signatures
+            // (a de-implemented interface can't be a value type). Normalize both sides so that intentional erasure
+            // is not a "mismatch". Targets/retransforms (eraseIfaces=false) must preserve their schema exactly.
+            boolean cl = artifact.equals("caller");
+            Schema e = Schema.read(expectedBytes, cl), a = Schema.read(actualBytes, cl);
             compare(owner, artifact, "class", e.header, a.header);
             compare(owner, artifact, "interfaces", e.interfaces, a.interfaces);
             compare(owner, artifact, "fields", e.fields, a.fields);
@@ -87,13 +91,13 @@ public final class LateAttachVerifier {
 
     private static final class Schema {
         String header; List<String> interfaces, fields, methods, nest, record, permitted;
-        static Schema read(byte[] b) {
+        static Schema read(byte[] b, boolean eraseIfaces) {
             ClassNode c = new ClassNode(); new ClassReader(b).accept(c, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
             Schema s = new Schema();
             s.header = c.name + "|" + c.access + "|" + c.superName;
             s.interfaces = List.copyOf(c.interfaces);
-            s.fields = new ArrayList<>(); for(FieldNode f:c.fields) s.fields.add(f.name+"|"+f.desc+"|"+f.access);
-            s.methods = new ArrayList<>(); for(MethodNode m:c.methods) s.methods.add(m.name+"|"+m.desc+"|"+m.access);
+            s.fields = new ArrayList<>(); for(FieldNode f:c.fields) s.fields.add(f.name+"|"+(eraseIfaces?RetransformConverter.eraseIfaceType(f.desc):f.desc)+"|"+f.access);
+            s.methods = new ArrayList<>(); for(MethodNode m:c.methods) s.methods.add(m.name+"|"+(eraseIfaces?RetransformConverter.eraseIfaceDesc(m.desc):m.desc)+"|"+m.access);
             s.nest = new ArrayList<>(); s.nest.add(String.valueOf(c.nestHostClass)); if(c.nestMembers!=null)s.nest.addAll(c.nestMembers);
             s.record = new ArrayList<>(); if(c.recordComponents!=null)for(RecordComponentNode r:c.recordComponents)s.record.add(r.name+"|"+r.descriptor+"|"+r.signature);
             s.permitted = c.permittedSubclasses==null?List.of():List.copyOf(c.permittedSubclasses);
