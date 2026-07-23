@@ -146,12 +146,11 @@ final class FabricPlatform implements LoaderPlatform {
         InjectionLogger.info("applied liquidbounce.accesswidener to live Knot ClassTweaker ("+awBytes.length+" bytes)");
 
         // 2) register LB's mixin configs into the live service, then downgrade them to required:false (probe workaround #1).
-        Mixins.addConfiguration("liquidbounce.mixins.json");
-        Mixins.addConfiguration("liquidbounce-fabric.mixins.json");
+        Mixins.addConfiguration("wurst.mixins.json");
         int downgraded = 0;
         for (Object cfg : Mixins.getConfigs()) {                                   // org.spongepowered.asm.mixin.transformer.Config
             String name = (String) cfg.getClass().getMethod("getName").invoke(cfg);
-            if (name == null || !name.contains("liquidbounce")) continue;
+            if (name == null || !name.contains("wurst")) continue;
             Object mixinConfig = cfg.getClass().getMethod("getConfig").invoke(cfg); // IMixinConfig -> MixinConfig
             Field req = mixinConfig.getClass().getDeclaredField("required"); req.setAccessible(true); req.setBoolean(mixinConfig, false);
             downgraded++;

@@ -377,9 +377,40 @@ public class RetransformConverter {
         clinit.maxLocals = Math.max(clinit.maxLocals, added.maxLocals);
     }
 
+    /** A dropped PAYLOAD duck interface used as a value TYPE names a de-implemented target, so a relocated method's
+     *  signature/field type must be erased to its single concrete implementor (matching the concrete receiver the
+     *  h$/duck-dispatch rewriting already produces) or Object for multi-implementor interfaces. Vanilla/pre-existing
+     *  interfaces still exist as types and are left untouched. */
+    static String eraseIfaceInternal(String internal) {
+        if (GIFACE == null || internal == null || !GIFACE.containsKey(internal) || !isPayloadIface(internal)) return internal;
+        List<String[]> impls = GIFACE.get(internal);
+        return (impls != null && impls.size() == 1) ? impls.get(0)[0] : "java/lang/Object";
+    }
+    static Type eraseIfaceType(Type t) {
+        if (t.getSort() == Type.OBJECT) { String e = eraseIfaceInternal(t.getInternalName()); return e.equals(t.getInternalName()) ? t : Type.getObjectType(e); }
+        if (t.getSort() == Type.ARRAY && t.getElementType().getSort() == Type.OBJECT) {
+            String e = eraseIfaceInternal(t.getElementType().getInternalName());
+            if (!e.equals(t.getElementType().getInternalName())) return Type.getType("[".repeat(t.getDimensions()) + "L" + e + ";");
+        }
+        return t;
+    }
+    /** Erase payload duck-interface types in a single field/type descriptor. */
+    static String eraseIfaceType(String typeDesc) {
+        if (GIFACE == null || PAYLOAD_CLASSES.isEmpty() || typeDesc == null || typeDesc.isEmpty()) return typeDesc;
+        char c = typeDesc.charAt(0);
+        if (c != 'L' && c != '[') return typeDesc;
+        return eraseIfaceType(Type.getType(typeDesc)).getDescriptor();
+    }
+    static String eraseIfaceDesc(String desc) {
+        if (GIFACE == null || PAYLOAD_CLASSES.isEmpty()) return desc;
+        StringBuilder sb = new StringBuilder("(");
+        for (Type a : Type.getArgumentTypes(desc)) sb.append(eraseIfaceType(a).getDescriptor());
+        return sb.append(')').append(eraseIfaceType(Type.getReturnType(desc)).getDescriptor()).toString();
+    }
+
     MethodNode relocateMethod(MethodNode m) {
         boolean isStatic = (m.access & Opcodes.ACC_STATIC) != 0;
-        String newDesc = isStatic ? m.desc : "(" + targetDesc + m.desc.substring(1);
+        String newDesc = eraseIfaceDesc(isStatic ? m.desc : "(" + targetDesc + m.desc.substring(1));
         MethodNode s = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "h$" + m.name, newDesc, null,
             m.exceptions == null ? null : m.exceptions.toArray(new String[0]));
         s.instructions = m.instructions; s.tryCatchBlocks = m.tryCatchBlocks;
@@ -509,7 +540,7 @@ public class RetransformConverter {
                 // call to a mixin-ADDED method (relocated to a sidecar). GADDED spans ALL targets, so a call to a base
                 // class's @Unique method from a subclass mixin's relocated body routes to the BASE class's sidecar.
                 String[] g = addedCallTarget(mi); String ot = g[0], os = g[1]; boolean gStatic = "1".equals(g[2]);
-                String nd = gStatic ? mi.desc : "(L" + ot + ";" + mi.desc.substring(1);
+                String nd = eraseIfaceDesc(gStatic ? mi.desc : "(L" + ot + ";" + mi.desc.substring(1));
                 m.instructions.set(p, new MethodInsnNode(Opcodes.INVOKESTATIC, os, "h$" + mi.name, nd, false));
             } else if (inSidecar && p instanceof MethodInsnNode mi && mi.owner.equals(targetInternal)
                     && (mi.getOpcode() == Opcodes.INVOKESPECIAL || mi.getOpcode() == Opcodes.INVOKEVIRTUAL || mi.getOpcode() == Opcodes.INVOKESTATIC) && !mi.name.equals("<init>")
@@ -753,7 +784,21 @@ public class RetransformConverter {
                 }
             }
         }
-        return n == 0 ? callerBytes : write(c, callerBytes);
+        // Erase payload duck-interface TYPES in this caller's declared field/method signatures + their access
+        // instructions. The cast/invoke SITES were rewritten above, but a field like `IMinecraftClient IMC` still
+        // names a de-implemented interface -> it fails the residual-reference gate and would VerifyError. Same
+        // erasure the sidecar gets: payload interface -> its single concrete implementor (or Object).
+        int e = 0;
+        for (FieldNode f : c.fields) { String nd = eraseIfaceType(f.desc); if (!nd.equals(f.desc)) { f.desc = nd; f.signature = null; e++; } }
+        for (MethodNode m : c.methods) {
+            String nd = eraseIfaceDesc(m.desc); if (!nd.equals(m.desc)) { m.desc = nd; m.signature = null; e++; }
+            if (m.instructions != null) for (AbstractInsnNode p = m.instructions.getFirst(); p != null; p = p.getNext()) {
+                if (p instanceof FieldInsnNode fi) { String d = eraseIfaceType(fi.desc); if (!d.equals(fi.desc)) { fi.desc = d; e++; } }
+                else if (p instanceof MethodInsnNode mi) { String d = eraseIfaceDesc(mi.desc); if (!d.equals(mi.desc)) { mi.desc = d; e++; } }
+            }
+            if (m.localVariables != null) for (var lv : m.localVariables) { String d = eraseIfaceType(lv.desc); if (d != null && !d.equals(lv.desc)) { lv.desc = d; lv.signature = null; } }
+        }
+        return (n == 0 && e == 0) ? callerBytes : write(c, callerBytes);
     }
 
     /** Spill an interface invocation to fresh locals and call the generic dispatcher without adding a helper method. */

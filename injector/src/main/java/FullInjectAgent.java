@@ -198,21 +198,20 @@ public class FullInjectAgent {
             Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft", false, SYS);
             Object mc = mcCls.getMethod("getInstance").invoke(null);
             Runnable kick = () -> { RegistryThawSession thaw=null; try {
-                // Initializing the singleton registers its ClientStartEvent handler. Loading it with initialize=false
-                // fires the event into an empty listener set; the readiness waiter then initializes LiquidBounce on
-                // its own background thread after the event was already lost, causing module singleton races.
-                Class.forName("net.ccbluex.liquidbounce.LiquidBounce", true, SYS);
-                Class<?> em = Class.forName("net.ccbluex.liquidbounce.event.EventManager", true, SYS);
-                Object emInst = em.getField("INSTANCE").get(null);
-                Object ev = Class.forName("net.ccbluex.liquidbounce.event.events.ClientStartEvent", true, SYS).getField("INSTANCE").get(null);
-                java.lang.reflect.Method callEvent = em.getMethod("callEvent", Class.forName("net.ccbluex.liquidbounce.event.Event", true, SYS));
+                // Wurst is a plain synchronous ModInitializer: WurstInitializer.onInitialize() ->
+                // WurstClient.INSTANCE.initialize(). Post-attach the game is fully up (safer than mod-load time),
+                // so we init inside a registry-thaw window, then publish the already-loaded target retransforms.
                 if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("Bootstrap class preflight produced verification errors");
                 thaw = RegistryThawSession.begin();
-                InjectionLogger.info("(MC main thread) callEvent(ClientStartEvent)");
-                callEvent.invoke(emInst, ev);
-                if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("ClientStartEvent class loading produced verification errors");
-                InjectionLogger.info("ClientStartEvent dispatched");
-                restoreRegistriesAfterInitialization(mcCls, mc, thaw);
+                InjectionLogger.info("(MC main thread) init Wurst via WurstInitializer.onInitialize()");
+                Object wi = Class.forName("net.wurstclient.WurstInitializer", true, SYS).getDeclaredConstructor().newInstance();
+                wi.getClass().getMethod("onInitialize").invoke(wi);
+                if(LateAttachVerifier.hasFatalErrors())throw new IllegalStateException("Wurst init produced verification errors");
+                InjectionLogger.info("WurstInitializer.onInitialize() returned; activating loaded targets");
+                thaw.close(); thaw=null;
+                activateLoadedTargets(INST);
+                lbrt.JoinGate.cancelAndOpen();
+                InjectionLogger.info("Wurst injection complete");
             } catch (Throwable t) {
                 // Always reopen the gate on ANY kick failure, including a throw BEFORE RegistryThawSession.begin()
                 // (LiquidBounce clinit, reflection, or the fatal-error check) where thaw is still null — otherwise
