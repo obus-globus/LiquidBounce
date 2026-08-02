@@ -29,9 +29,9 @@ import net.ccbluex.liquidbounce.api.thirdparty.translator.TranslatorMode
 import net.ccbluex.liquidbounce.authlib.utils.array
 import net.ccbluex.liquidbounce.authlib.utils.string
 import net.ccbluex.liquidbounce.config.types.group.ModeValueGroup
-import okhttp3.HttpUrl.Companion.toHttpUrl
+import net.ccbluex.liquidbounce.utils.client.OkHttpCompat
 
-private val GOOGLE_API_URL = "https://translate.googleapis.com/translate_a/t?client=gtx&dt=t".toHttpUrl()
+private val GOOGLE_API_URL = OkHttpCompat.httpUrl("https://translate.googleapis.com/translate_a/t?client=gtx&dt=t")
 
 /**
  * @author MukjepScarlet

@@ -51,6 +51,7 @@ import net.ccbluex.liquidbounce.event.suspendHandler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.injection.mixins.authlib.MixinYggdrasilMinecraftSessionServiceAccessor
+import net.ccbluex.liquidbounce.utils.client.OkHttpCompat
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.inGame
 import net.ccbluex.liquidbounce.utils.kotlin.Minecraft
@@ -62,8 +63,6 @@ import net.minecraft.core.ClientAsset
 import net.minecraft.world.entity.player.PlayerModelType
 import net.minecraft.world.entity.player.PlayerSkin
 import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.function.Supplier
 import kotlin.time.Duration.Companion.seconds
@@ -233,11 +232,11 @@ object ModuleSkinChanger : ClientModule("SkinChanger", ModuleCategories.RENDER) 
 
                 request {
                     uploadSkin(
-                        skinType.type.variant.toRequestBody(HttpClient.MediaTypes.TEXT_PLAIN),
-                        MultipartBody.Part.createFormData(
-                            name = "file",
-                            filename = "skin.png",
-                            body = file.asRequestBody(HttpClient.MediaTypes.IMAGE_PNG)
+                        OkHttpCompat.requestBody(HttpClient.MediaTypes.TEXT_PLAIN, skinType.type.variant),
+                        OkHttpCompat.formDataPart(
+                            "file",
+                            "skin.png",
+                            OkHttpCompat.requestBody(HttpClient.MediaTypes.IMAGE_PNG, file)
                         )
                     )
                 }

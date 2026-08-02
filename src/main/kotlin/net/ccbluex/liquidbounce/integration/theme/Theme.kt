@@ -45,7 +45,7 @@ import net.ccbluex.liquidbounce.utils.text.capitalize
 import net.ccbluex.liquidbounce.utils.kotlin.Minecraft
 import net.minecraft.server.packs.resources.ResourceManager
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener
-import okhttp3.Headers.Companion.headersOf
+import okhttp3.Headers
 import java.io.Closeable
 import java.io.File
 import java.io.InputStream
@@ -60,10 +60,14 @@ import java.util.Locale
 class Theme private constructor(val origin: Origin, url: String) :
     BaseApi(
         url.trimEnd('/'),
-        defaultHeaders = headersOf(
-            HttpHeaderNames.COOKIE.toString(),
-            "${AuthConfig.AUTH_COOKIE_NAME}=${ClientInteropServer.AUTH_CODE}",
-        )
+        // Builder rather than headersOf: the Companion factory does not resolve against the older
+        // okhttp a host may put on a shared classloader.
+        defaultHeaders = Headers.Builder()
+            .add(
+                HttpHeaderNames.COOKIE.toString(),
+                "${AuthConfig.AUTH_COOKIE_NAME}=${ClientInteropServer.AUTH_CODE}",
+            )
+            .build()
     ), Closeable, ResourceManagerReloadListener {
 
     enum class Origin(override val tag: String, val external: Boolean) : Tagged {

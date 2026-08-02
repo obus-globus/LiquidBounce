@@ -34,6 +34,7 @@ import net.ccbluex.liquidbounce.config.gson.interopGson
 import net.ccbluex.liquidbounce.config.gson.util.readJson
 import net.ccbluex.liquidbounce.mcef.MCEF
 import net.ccbluex.liquidbounce.mcef.listeners.OkHttpProgressInterceptor
+import net.ccbluex.liquidbounce.utils.client.OkHttpCompat
 import net.ccbluex.liquidbounce.utils.client.error.ErrorHandler
 import net.ccbluex.liquidbounce.utils.client.logger
 import net.ccbluex.liquidbounce.utils.client.mc
@@ -46,15 +47,12 @@ import okhttp3.Callback
 import okhttp3.Dispatcher
 import okhttp3.Headers
 import okhttp3.Interceptor
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.coroutines.executeAsync
 import okio.BufferedSource
-import okio.sink
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -91,7 +89,7 @@ object HttpClient {
         "${if (LiquidBounce.IN_DEVELOPMENT) "dev" else "release"}, ${System.getProperty("os.name")})"
 
     /**
-     * Unfortunately, Lunar Client uses OkHttp 4.12.0 which does not have [Headers.EMPTY]
+     * Unfortunately, Lunar Client bundles OkHttp 3.14.9 which does not have [Headers.EMPTY]
      */
     @Deprecated("Use Headers.EMPTY instead when Lunar Client updates OkHttp to 5.10 or newer.")
     @JvmField
@@ -99,19 +97,19 @@ object HttpClient {
 
     object MediaTypes {
         @JvmField
-        val TEXT_PLAIN = "text/plain; charset=utf-8".toMediaType()
+        val TEXT_PLAIN = OkHttpCompat.mediaType("text/plain; charset=utf-8")
 
         @JvmField
-        val JSON = "application/json; charset=utf-8".toMediaType()
+        val JSON = OkHttpCompat.mediaType("application/json; charset=utf-8")
 
         @JvmField
-        val FORM = "application/x-www-form-urlencoded".toMediaType()
+        val FORM = OkHttpCompat.mediaType("application/x-www-form-urlencoded")
 
         @JvmField
-        val IMAGE_PNG = "image/png".toMediaType()
+        val IMAGE_PNG = OkHttpCompat.mediaType("image/png")
 
         @JvmField
-        val OCTET_STREAM = "application/octet-stream".toMediaType()
+        val OCTET_STREAM = OkHttpCompat.mediaType("application/octet-stream")
     }
 
     private val defaultClient = OkHttpClient.Builder()
@@ -287,10 +285,10 @@ fun BufferedSource.utf8Lines(): Iterator<String> =
  * Save response body to file.
  */
 fun Response.toFile(file: File) = use { response ->
-    file.sink().use(response.body.source()::readAll)
+    OkHttpCompat.sink(file).use(response.body.source()::readAll)
 }
 
-fun String.asForm() = toRequestBody(HttpClient.MediaTypes.FORM)
+fun String.asForm() = OkHttpCompat.requestBody(HttpClient.MediaTypes.FORM, this)
 
 class HttpException(val method: HttpMethod, val url: String, val code: Int, val content: String)
     : Exception("${method.name} $url failed with code $code: $content")

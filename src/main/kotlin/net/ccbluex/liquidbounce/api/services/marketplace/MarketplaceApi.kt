@@ -33,9 +33,10 @@ import net.ccbluex.liquidbounce.api.models.marketplace.MarketplaceRevisionDepend
 import net.ccbluex.liquidbounce.api.models.pagination.PaginatedResponse
 import net.ccbluex.liquidbounce.authlib.utils.toRequestBody
 import net.ccbluex.liquidbounce.config.gson.publicGson
+import net.ccbluex.liquidbounce.utils.client.OkHttpCompat
 import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.util.UUID
 
 @Suppress("TooManyFunctions")
 object MarketplaceApi : BaseApi(config.apiEndpointV3) {
@@ -127,8 +128,11 @@ object MarketplaceApi : BaseApi(config.apiEndpointV3) {
         changelog: String? = null,
         dependencies: String? = null
     ) {
-        val multipartBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("file", file.name, file.asRequestBody(HttpClient.MediaTypes.OCTET_STREAM))
+        val multipartBuilder = MultipartBody.Builder(UUID.randomUUID().toString()).setType(MultipartBody.FORM)
+            .addFormDataPart(
+                "file", file.name,
+                OkHttpCompat.requestBody(HttpClient.MediaTypes.OCTET_STREAM, file)
+            )
             .addFormDataPart("version", version)
 
         changelog?.let { multipartBuilder.addFormDataPart("changelog", it) }
@@ -199,11 +203,11 @@ object MarketplaceApi : BaseApi(config.apiEndpointV3) {
 
     // Thumbnails
     suspend fun uploadThumbnail(session: OAuthSession, id: Int, thumbnailFile: File) {
-        val requestBody = MultipartBody.Builder().setType(MultipartBody.FORM)
+        val requestBody = MultipartBody.Builder(UUID.randomUUID().toString()).setType(MultipartBody.FORM)
             .addFormDataPart(
                 "thumbnail",
                 thumbnailFile.name,
-                thumbnailFile.asRequestBody(HttpClient.MediaTypes.IMAGE_PNG)
+                OkHttpCompat.requestBody(HttpClient.MediaTypes.IMAGE_PNG, thumbnailFile)
             )
             .build()
 
