@@ -17,6 +17,8 @@
     "djl.MixinUtils",
     "lithium.MixinChunkAwareBlockCollisionSweeperBlockPos",
     "lithium.MixinChunkAwareBlockCollisionSweeperVoxelShape",
+    "mcauthlib.MixinAuthlibRequestBody",
+    "mcauthlib.MixinHttpUtils",
     "minecraft.block.MixinBlock",
     "minecraft.block.MixinBlockCollisions",
     "minecraft.block.MixinBlockGetter",
