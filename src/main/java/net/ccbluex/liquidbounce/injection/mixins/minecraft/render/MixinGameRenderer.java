@@ -25,6 +25,7 @@ import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
+import net.ccbluex.liquidbounce.LiquidBounce;
 import net.ccbluex.liquidbounce.event.EventManager;
 import net.ccbluex.liquidbounce.event.events.GameRenderEvent;
 import net.ccbluex.liquidbounce.event.events.PerspectiveEvent;
@@ -154,6 +155,10 @@ public abstract class MixinGameRenderer {
         FeatureRenderDispatcher instance, SubmitNodeStorage submitNodeStorage,
         Operation<FeatureRenderDispatcher.PreparedFrame> original
     ) {
+        if (!LiquidBounce.INSTANCE.isInitialized()) {
+            return original.call(instance, submitNodeStorage);
+        }
+
         var frame =
             ModuleItemChams.Lightmap.doOverride(() -> original.call(instance, submitNodeStorage));
         ItemChamsEffectRenderer.capture(frame);
@@ -165,6 +170,10 @@ public abstract class MixinGameRenderer {
      */
     @Inject(method = "renderItemInHand", at = @At("RETURN"))
     private void composeItemChamsEffects(CallbackInfo ci) {
+        if (!LiquidBounce.INSTANCE.isInitialized()) {
+            return;
+        }
+
         ItemChamsEffectRenderer.compositeIfNeeded(this.mainRenderTarget);
     }
 
@@ -177,6 +186,10 @@ public abstract class MixinGameRenderer {
         )
     )
     private void hookItemChamsLightmapRefresh(CallbackInfo ci) {
+        if (!LiquidBounce.INSTANCE.isInitialized()) {
+            return;
+        }
+
         ModuleItemChams.Lightmap.refresh(this.lightmap.getTextureView());
     }
 

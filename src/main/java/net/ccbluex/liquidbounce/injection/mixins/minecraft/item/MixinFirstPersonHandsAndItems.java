@@ -24,6 +24,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
+import net.ccbluex.liquidbounce.LiquidBounce;
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleSwordBlock;
 import net.ccbluex.liquidbounce.features.module.modules.render.animations.ModuleAnimations;
 import net.ccbluex.liquidbounce.features.module.modules.render.animations.SwingAnimations;
@@ -67,7 +68,7 @@ public abstract class MixinFirstPersonHandsAndItems {
         ItemStackRenderState instance, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int lightCoords, int overlayCoords, int outlineColor, Operation<Void> original,
         @Local(argsOnly = true, name = "itemStack") ItemStack itemStack
     ) {
-        if (itemStack.getItem() instanceof ShieldItem) {
+        if (LiquidBounce.INSTANCE.isInitialized() && itemStack.getItem() instanceof ShieldItem) {
             FirstPersonShieldTint.render(
                 () -> original.call(instance, poseStack, submitNodeCollector, lightCoords, overlayCoords, outlineColor));
             return;

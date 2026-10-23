@@ -21,6 +21,7 @@ package net.ccbluex.liquidbounce.injection.mixins.minecraft.render;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+import net.ccbluex.liquidbounce.LiquidBounce;
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleItemChams;
 import net.ccbluex.liquidbounce.features.module.modules.render.customambience.ModuleCustomAmbience;
 import net.minecraft.client.renderer.Lightmap;
@@ -47,6 +48,12 @@ public abstract class MixinLightmap {
         at = @At("RETURN")
     )
     private GpuTextureView lightmapOverride(GpuTextureView original) {
+        // Other clients can render before modules exist, and reaching a nested value group
+        // ahead of its module breaks the module's initialisation.
+        if (!LiquidBounce.INSTANCE.isInitialized()) {
+            return original;
+        }
+
         return ModuleItemChams.Lightmap.OVERRIDE.orElse(original);
     }
 
@@ -61,6 +68,10 @@ public abstract class MixinLightmap {
         cancellable = true
     )
     private void injectCustomClearColor(LightmapRenderState renderState, CallbackInfo ci) {
+        if (!LiquidBounce.INSTANCE.isInitialized()) {
+            return;
+        }
+
         ModuleCustomAmbience.CustomLightmap customLightmap = ModuleCustomAmbience.CustomLightmap.INSTANCE;
         if (customLightmap.getRunning() && customLightmap.getMode().getActiveMode().edit(this.texture, renderState)) {
             ci.cancel();
